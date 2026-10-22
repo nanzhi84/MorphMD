@@ -3,12 +3,12 @@
 ## 1. 项目定位与命名约定
 - **项目名称**：`MorphMD`（基于“一源多态 Multi-target Rendering”架构的轻量级统一 Markdown 编辑器）。
 - **核心目标视图标识符（Target ID）**：
-  - `wechat`：微信公众号长文视图（支持微信兼容富文本复制）
-  - `x-article`：X (Twitter) Articles 长文视图（支持富文本与清洁格式复制）
-  - `social-cards`：多页图文卡片视图（支持自动分页预览与高分 PNG / ZIP 批量导出）
+  - `wechat`：微信公众号长文视图（支持微信兼容富文本全文与局部框选自由复制）
+  - `x-article`：X (Twitter) Articles 长文视图（支持平台原生语义映射、受限块转图降级与富文本复制）
+  - `cards`：多页图文卡片视图（支持 `3:4`、`4:5`、`1:1`、`16:9` 等可选常用画布比例预设、自动流式分页预览与高分 PNG / ZIP 批量导出）
 
 ## 2. 领域红线与不变量
-- **原稿语义零篡改（Source Fidelity）**：所有目标视图必须派生自同一份源 Markdown，严禁任何视图适配器增删、润色、摘要或静默丢弃用户的正文语义、标点、代码块、引用或链接。
-- **单一设计变量与可扩展样式边界**：配色、字体族、字号与间距等视觉属性统一由共享设计变量（Design Tokens）与用户自定义 CSS 覆盖层驱动，禁止将单一视图硬编码为不可调节的死板模板。
-- **预览与交付产物一致性**：右侧 Tab 预览所呈现的排版、分页、列表缩进与代码高亮，必须与最终复制（`wechat` / `x-article`）或导出（`social-cards` 图文图片包）的实际交付产物保持视觉一致。
-- **架构与决策入口**：全局架构现状详见 [docs/architecture/overview.md](docs/architecture/overview.md)，核心架构权衡与模块选型详见 [ADR-0001](docs/adr/0001-unified-ast-and-pluggable-view-adapters.md)。
+- **原稿语义零篡改（Source Fidelity）**：所有目标视图必须派生自同一份源 Markdown 与静态资产清单（`morph-asset://`），严禁任何视图适配器增删、润色、摘要或静默丢弃用户的正文语义、标点、代码块、引用或链接；发生平台视觉降级（如复杂块转图片、外链转脚注）时必须保留原始替代文本与可定位诊断。
+- **单一设计变量与可扩展样式边界**：配色、字体族、字号与间距等视觉属性统一由共享设计变量（Design Tokens）与用户自定义 CSS 覆盖层在各视图能力边界内驱动，禁止将单一视图硬编码为不可调节的死板模板。
+- **预览与交付快照一致性**：同一文档、样式与资源版本生成唯一的版本化交付快照，右侧 Tab 预览所呈现的排版、多比例分页、列表缩进、内嵌图片与代码高亮，必须与最终全文复制、右栏自由框选复制（`Cmd/Ctrl + C`）及卡片导出的交付结构与布局保持一致。
+- **架构与决策入口**：全局架构现状详见 [docs/architecture/overview.md](docs/architecture/overview.md)，核心架构权衡与模块选型详见 [ADR-0002](docs/adr/0002-isomorphic-delivery-snapshot-and-asset-pipeline.md)。
