@@ -1,0 +1,136 @@
+// Engine entry: verifyArticleStructure.
+// Flow: darkmode convert/validate → getParaList → nest detection (dry-run) →
+// collect style candidates → layout measurement → aggregate by property.
+
+import getParaList from './paragraph.js';
+import { domUtils } from './dom.js';
+import { deleteNestNode } from './nest.js';
+import Darkmode from './darkmode.js';
+import { propertyRules } from './rules-text.js';
+import { getInvalidNodes } from './collect.js';
+import { detectLayoutIssues } from './layout.js';
+import type { VerifyOpts, VerifyResult, ViolationEntry } from './types.js';
+
+const DARKMODE_RUN_OPTS = {
+  mode: 'dark',
+  defaultDarkTextColor: '#989898',
+  whitelist: { attribute: ['data-no-dark'] },
+  needJudgeFirstPage: false,
+  noEmit: true,
+};
+
+// Reverse-lookup the paragraph index for a node via the nearest data-blockidx
+// ancestor, falling back to paragraphList.contains. Returns -1 when unknown.
+//
+// stamp 验证包含性：quickRegex 跳过的段落（如无 style 属性的 ul 列表块）
+// 自身子树没有盖章，其内部节点反查会一路穿透到被早期段落盖章的共享外层
+// 容器，得到错误的早期段号（曾把文末的 ul 列表归到第 1 段）。所以找到
+// stamp 后必须确认 paragraphList[idx] 确实包含该节点，否则继续向上；
+// 全部无效时落到 findIndex 兜底（第一个包含该节点的段落）。
+function resolveParagraphIndex(node: any, paragraphList: any[]): number {
+  let el = node;
+  while (el) {
+    if (typeof el.getAttribute === 'function') {
+      const idx = el.getAttribute('data-blockidx');
+      if (idx !== null && idx !== undefined && idx !== '') {
+        const i = parseInt(idx, 10);
+        const p = paragraphList[i];
+        if (p && typeof p.contains === 'function' && p.contains(node)) return i;
+      }
+    }
+    el = el.parentNode;
+  }
+  return paragraphList.findIndex((p: any) => p && p.contains && p.contains(node));
+}
+
+async function verifyArticleStructure(articleBody: any, opts: VerifyOpts = {}): Promise<VerifyResult> {
+  const nodes = articleBody.querySelectorAll('*');
+  // mp-darkmode's conversion resolves backgrounds/gradients via the live render
+  // tree (getComputedStyle), so the node must be attached to the document during
+  // the darkmode stage — otherwise gradient/contrast markers are never stamped
+  // and darkmode rules silently produce nothing. Attach only for this stage, then
+  // detach again so the subsequent layout measurement keeps its detached sandbox
+  // (attaching there caused false positives — see browser-runner.ts).
+  const doc = typeof document !== 'undefined' ? document : null;
+  const detached = doc && doc.body && !articleBody.parentNode;
+  if (detached) doc!.body.appendChild(articleBody);
+  Darkmode.reset(nodes, DARKMODE_RUN_OPTS);
+  Darkmode.run(nodes, DARKMODE_RUN_OPTS);
+  const darkmodeResult = Darkmode.validate(articleBody, DARKMODE_RUN_OPTS);
+  if (detached) doc!.body.removeChild(articleBody);
+
+  const paragraphList = getParaList(articleBody, {
+    isMarkNode(node: any) { return domUtils.isMarkNode(node); },
+    getNestedStructure: opts.getNestedStructure,
+    ignoreFlexChildren: opts.ignoreFlexChildren,
+    ignoreNotWriteableChildren: opts.ignoreNotWriteableChildren,
+    getSpan: opts.getSpan,
+  });
+
+  // Nest detection reuses the editor's deleteNestNode dry-run (isTest) mode.
+  const nestedNodes = deleteNestNode({ root: articleBody, isTest: true }) || [];
+
+  const invalidNodesResult = getInvalidNodes(paragraphList);
+
+  const fullHtmlString = articleBody && articleBody.outerHTML
+    ? articleBody.outerHTML
+    : (articleBody && articleBody.innerHTML ? `<section>${articleBody.innerHTML}</section>` : '');
+
+  const layoutIssues: Record<string, ViolationEntry> = await detectLayoutIssues(
+    invalidNodesResult.invalidNodes,
+    fullHtmlString,
+    opts.layoutDetectOptions as any,
+  );
+
+  // nestNodes: dedupe by paragraphIndex, keep the outermost (longest outerHTML).
+  if (nestedNodes.length > 0) {
+    const byPara = new Map<any, any>();
+    nestedNodes.forEach((item: any) => {
+      const paragraphIndex = resolveParagraphIndex(item, paragraphList);
+      const outerHTML = item.outerHTML || '';
+      const key = paragraphIndex !== undefined && paragraphIndex !== -1 ? `p_${paragraphIndex}` : item;
+      const exist = byPara.get(key);
+      if (!exist || (exist.outerHTML || '').length < outerHTML.length) {
+        byPara.set(key, { paragraphIndex, outerHTML });
+      }
+    });
+    layoutIssues.nestNodes = { violateRules: propertyRules['nest-level'], items: Array.from(byPara.values()) };
+  }
+
+  // darkmode: group by key.
+  if (darkmodeResult.length > 0) {
+    const byKey: Record<string, ViolationEntry> = {};
+    darkmodeResult.forEach((item: any) => {
+      if (!item || !item.key) return;
+      if (!byKey[item.key]) byKey[item.key] = { violateRules: item.violateRules || '', items: [] };
+      byKey[item.key].items.push({
+        outerHTML: item.outerHTML || (item.dom ? item.dom.outerHTML : ''),
+        // 用违规 dom 节点反查真实段号（mp-darkmode 不返回段落信息，旧逻辑
+        // `|| 0` 把所有 item 兜底成第 1 段，编辑器「定位」按钮全部跳错）。
+        // dom 已在原始容器上，data-blockidx 由 getInvalidNodes 盖章，可反查。
+        // 找不到时返回 -1（诚实未知），不要假装成第 1 段。
+        paragraphIndex: resolveParagraphIndex(item.dom, paragraphList),
+      });
+    });
+    Object.assign(layoutIssues, byKey);
+  }
+
+  // Aggregate: keep only paragraphIndex/outerHTML/rules/thIndex per item.
+  const filteredInfo: Record<string, ViolationEntry> = {};
+  for (const [property, issueGroup] of Object.entries(layoutIssues)) {
+    filteredInfo[property] = {
+      violateRules: issueGroup.violateRules,
+      items: issueGroup.items.map((item: any) => {
+        const filtered: any = { paragraphIndex: item.paragraphIndex, outerHTML: item.outerHTML };
+        if (item.rules) filtered.rules = item.rules;
+        if (item.thIndex !== undefined) filtered.thIndex = item.thIndex;
+        return filtered;
+      }),
+    };
+  }
+
+  const hasInValidData = Object.values(filteredInfo).some((g: any) => g.items && g.items.length > 0);
+  return hasInValidData ? { isValid: false, inValidInfo: filteredInfo } : { isValid: true, inValidInfo: {} };
+}
+
+export { verifyArticleStructure };

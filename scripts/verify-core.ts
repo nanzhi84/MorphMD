@@ -10,7 +10,9 @@ import {
   globalHeavyBlockCache,
   normalizeSelectionRange,
   serializeFullSnapshot,
+  verifyXArticleHtml,
 } from '../src/index';
+import { verifyWeChatArticleHtml } from '../src/core/wechat/runner';
 
 async function main() {
   console.log('=== MorphMD Core Verification Execution ===');
@@ -290,6 +292,28 @@ And the system diagram:
   // 7.4 Full Snapshot Serialization
   const fullPayload = serializeFullSnapshot(wechatSnapshot, assetStore);
 
+  // 7.5 Verify WeChat Snapshot Compliance against wechatjs/verify-article-structure-spec
+  console.log('Running wechatjs/verify-article-structure-spec verification on WeChat snapshot...');
+  const wechatVerifyResult = await verifyWeChatArticleHtml(wechatSnapshot.html);
+  fs.writeFileSync(path.join(artifactsDir, 'wechat-verify-report.json'), JSON.stringify(wechatVerifyResult, null, 2));
+  console.log('WeChat Structure Spec Result:', JSON.stringify(wechatVerifyResult));
+  if (!wechatVerifyResult.isValid) {
+    throw new Error(
+      `WeChat snapshot failed verify-article-structure-spec check: ${JSON.stringify(wechatVerifyResult.inValidInfo)}`
+    );
+  }
+
+  // 7.6 Verify X-Article Snapshot Compliance against X Articles Draft.js Structure Spec
+  console.log('Running verifyXArticleStructure verification on X-Article snapshot...');
+  const xVerifyResult = verifyXArticleHtml(xSnapshot.html);
+  fs.writeFileSync(path.join(artifactsDir, 'x-article-verify-report.json'), JSON.stringify(xVerifyResult, null, 2));
+  console.log('X-Article Structure Spec Result:', JSON.stringify({ isValid: xVerifyResult.isValid, blockCount: xVerifyResult.draftState.blocks.length }));
+  if (!xVerifyResult.isValid) {
+    throw new Error(
+      `X-Article snapshot failed verifyXArticleStructure check: ${JSON.stringify(xVerifyResult.inValidInfo)}`
+    );
+  }
+
   // 8. Asset package manifest export
   const manifest = assetStore.exportPackageManifest(sourceMarkdown);
   fs.writeFileSync(
@@ -352,7 +376,10 @@ And the system diagram:
     timestamp: new Date().toISOString(),
     status: 'PASS',
     wechatSnapshotLength: wechatSnapshot.html.length,
+    wechatStructureSpecValid: wechatVerifyResult.isValid,
     xSnapshotLength: xSnapshot.html.length,
+    xArticleStructureSpecValid: xVerifyResult.isValid,
+    xArticleDraftBlockCount: xVerifyResult.draftState.blocks.length,
     assetsCount: manifest.assets.length,
     cacheStats: globalHeavyBlockCache.getStats(),
     diagnosticsCount: allDiagnostics.length,

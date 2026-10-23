@@ -27,6 +27,10 @@ export const DEFAULT_ALLOWED_STYLE_PROPS = new Set([
   'vertical-align',
   'word-break',
   'overflow-wrap',
+  'overflow',
+  'overflow-x',
+  'overflow-y',
+  'white-space',
   'box-shadow',
   'opacity',
 ]);

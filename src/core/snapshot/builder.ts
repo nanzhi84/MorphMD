@@ -6,6 +6,8 @@ import { inlineStyles } from '../style/inliner';
 import { getDefaultCapabilities } from '../style/guard';
 import type { DesignTokens } from '../style/tokens';
 import { parseDocument } from '../dom/env';
+import { dedupeWeChatNesting } from '../wechat/normalizer';
+import { normalizeXArticleStructureAndStyles } from '../x-article/normalizer';
 import type {
   DeliverySnapshot,
   TargetId,
@@ -223,6 +225,25 @@ function finalizeSnapshot(
           img.setAttribute('src', deliveryUrl);
           img.setAttribute('data-morph-snapshot-src', deliveryUrl);
         }
+
+        if (targetId === 'wechat' && record.width && record.width > 0) {
+          if (record.height && record.height > 0) {
+            img.setAttribute('data-ratio', String(Number((record.height / record.width).toFixed(6))));
+          }
+          if (record.width >= 374) {
+            img.setAttribute('data-w', String(Math.max(record.width, 677)));
+            if (capabilities.allowInlineStyles) {
+              const allowed = capabilities.allowedStyleProps;
+              if (!allowed || allowed.has('width')) img.style.setProperty('width', '100%');
+              if (!allowed || allowed.has('height')) img.style.setProperty('height', 'auto');
+              if (!allowed || allowed.has('display')) img.style.setProperty('display', 'block');
+            }
+          } else {
+            img.setAttribute('data-w', String(record.width));
+          }
+        }
+      } else if (targetId === 'wechat' && !img.hasAttribute('data-w')) {
+        img.setAttribute('data-w', '677');
       }
     }
 
@@ -301,9 +322,25 @@ function finalizeSnapshot(
           if (tex) img.setAttribute('data-math-tex', tex);
           img.setAttribute('data-morph-snapshot-src', deliveryUrl);
           img.setAttribute('data-morph-asset-id', assetId);
+          if (targetId === 'wechat') {
+            if (record.width && record.width > 0) {
+              img.setAttribute('data-w', String(record.width >= 374 ? Math.max(record.width, 677) : record.width));
+              if (record.height && record.height > 0) {
+                img.setAttribute('data-ratio', String(Number((record.height / record.width).toFixed(6))));
+              }
+            } else {
+              img.setAttribute('data-w', '677');
+            }
+          }
           node.replaceChildren(img);
         }
       }
+    }
+
+    if (targetId === 'wechat') {
+      dedupeWeChatNesting(root, allDiagnostics);
+    } else if (targetId === 'x-article') {
+      normalizeXArticleStructureAndStyles(root, allDiagnostics, capabilities);
     }
 
     const finalHtml = (root.parentElement && root.parentElement.tagName.toLowerCase() !== 'body')

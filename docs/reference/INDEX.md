@@ -4,4 +4,5 @@
 
 | 文件路径 | 来源链接 / 背景说明 | 备注 |
 | :--- | :--- | :--- |
-| _示例：`example-spec.pdf`_ | _第三方接口规范文档_ | _初始归档_ |
+| [wechat-verify-article-structure-spec.md](wechat-verify-article-structure-spec.md) | `https://github.com/wechatjs/verify-article-structure-spec`（微信公众平台文章结构验证规范仓 `verify_article_structure.md`） | 官方排版与结构合规权威基线（v0.2.24） |
+| [x-article-draftjs-structure-spec.md](x-article-draftjs-structure-spec.md) | X Articles (`x.com/compose/article`) Draft.js `convertFromHTML` 转换规范与开源社区发布器实测契约 | X 长文排版、受限块转图降级与结构验证基线 |

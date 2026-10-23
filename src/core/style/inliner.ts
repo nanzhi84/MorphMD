@@ -7,6 +7,7 @@ import {
   resolveScopeCustomProperties, computeElementVarScope, type LayerCandidate,
 } from './guard';
 import { DEFAULT_DESIGN_TOKENS, type DesignTokens } from './tokens';
+import { normalizeWeChatStructureAndStyles } from '../wechat/normalizer';
 
 export interface InlineStyleOptions {
   customCss?: string;
@@ -80,7 +81,7 @@ ${tokenCssLines}
     .morph-h2 { font-family: var(--morph-font-serif); }
     .morph-h3 { font-family: var(--morph-font-serif); }
     .morph-p { margin-bottom: var(--morph-block-gap); line-height: var(--morph-line-height); }
-    .morph-code { font-family: var(--morph-font-mono); }
+    .morph-code { font-family: var(--morph-font-mono); overflow-x: auto; }
     ${analysis.sanitizedCss}
   `;
 
@@ -424,8 +425,14 @@ ${tokenCssLines}
       }
     }
 
+    // 3.45 WeChat article structure & style compliance guard (wechatjs/verify-article-structure-spec)
+    if (capabilities.targetId === 'wechat') {
+      normalizeWeChatStructureAndStyles(rootContainer, allDiagnostics, capabilities.allowedStyleProps);
+    }
+
     // 3.5 Ensure strict compliance with allowedStyleProps across all styled elements
-    for (const el of allStyled) {
+    const allStyledFinal = [rootContainer, ...Array.from(rootContainer.querySelectorAll<HTMLElement>('[style]'))];
+    for (const el of allStyledFinal) {
       if (!el.getAttribute('style')) continue;
       const isRaster = isRasterBlockOrDescendant(el, capabilities);
       const allowed = isRaster
