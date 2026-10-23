@@ -66,10 +66,10 @@ flowchart LR
 
 ### 3.1 实施与验收 Checklist
 
-- [ ] 初始化 `Vite + TypeScript + React 19 + CodeMirror 6` 工程配置，通过 `tsc --noEmit` 严格类型检查与 `harness doctor` 规范巡检。
-- [ ] 完成 `src/core/ast/`：支持 GFM 表格、Callout、公式、代码块及跨块引用定义解析，注入 `.morph-*` 语义类与 `data-source-range`，验证 Shiki / KaTeX 重型块缓存命中与分层失效。
-- [ ] 完成 `src/core/assets/`：实现 `AssetStore` 异步状态机、天然尺寸与 EXIF 归一化、有界缓存与 `blobUrl` 引用计数释放，以及相对路径 `./assets/` 导出清单映射。
-- [ ] 完成 `src/core/style/`：实现 `css-tree` 属性白名单提取、危险规则拦截、受控 `getComputedStyle` 样式内联、`::before/::after` 简单装饰实体化，以及 `x-article` 样式能力守卫诊断。
-- [ ] 完成 `src/core/snapshot/` 与 `src/core/selection/`：实现 `DeliverySnapshot` 生成与 `Selection Context Normalizer`（验证标题内部选字补回 `<h2>` 与内联颜色、有序列表中段补回 `<ol start="N">`、跨页选区自动剥离 `data-morph-generated` 页眉页脚与重复表头、图片/公式同步替换为 `dataUrl`）。
-- [ ] 真实执行自验：通过 `harness run issue1-core-verify -- ...` 在 `work/` 与 `artifacts/` 中运行真实图文混排 Markdown、自定义 CSS 与复杂 DOM 选区端到端验证脚本，核对 `artifacts/` 下实际生成的 HTML/Plain 剪贴板载荷与诊断回执。
-- [ ] 补充核心黑盒测试：在 `tests/` 下按领域能力建立黑盒测试套件并全部通过。
+- [x] 初始化 `Vite + TypeScript + React 19 + CodeMirror 6` 工程配置，通过 `tsc --noEmit` 严格类型检查与 `harness doctor` 规范巡检。
+- [x] 完成 `src/core/ast/`：支持 GFM 表格、Callout、公式、代码块及跨块引用定义解析，注入 `.morph-*` 语义类与 `data-source-range`，验证 Shiki / KaTeX 重型块缓存命中与分层失效。
+- [x] 完成 `src/core/assets/`：实现 `AssetStore` 异步状态机、天然尺寸与 EXIF 归一化、有界缓存与 `blobUrl` 引用计数释放，以及相对路径 `./assets/` 导出清单映射。
+- [x] 完成 `src/core/style/`：实现 `css-tree` 属性白名单提取、危险规则拦截、受控 `getComputedStyle` 样式内联、`::before/::after` 简单装饰实体化，以及 `x-article` 样式能力守卫诊断。
+- [x] 完成 `src/core/snapshot/` 与 `src/core/selection/`：实现 `DeliverySnapshot` 生成与 `Selection Context Normalizer`（验证标题内部选字补回 `<h2>` 与内联颜色、有序列表中段补回 `<ol start="N">`、跨页选区自动剥离 `data-morph-generated` 页眉页脚与重复表头、图片/公式同步替换为 `dataUrl`）。
+- [x] 真实执行自验：通过 `harness run issue1-core-verify -- ...` 在 `work/` 与 `artifacts/` 中运行真实图文混排 Markdown、自定义 CSS 与复杂 DOM 选区端到端验证脚本，核对 `artifacts/` 下实际生成的 HTML/Plain 剪贴板载荷与诊断回执。
+- [x] 补充核心黑盒测试：在 `tests/` 下按领域能力建立黑盒测试套件并全部通过。

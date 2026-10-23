@@ -1,3 +1,18 @@
 # Universal Harness runtime & verification sandboxes
 work/
 artifacts/
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+*.local
+
+# Test / Coverage
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
