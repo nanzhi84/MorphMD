@@ -11,4 +11,5 @@
 - **原稿语义零篡改（Source Fidelity）**：所有目标视图必须派生自同一份源 Markdown 与静态资产清单（`morph-asset://`），严禁任何视图适配器增删、润色、摘要或静默丢弃用户的正文语义、标点、代码块、引用或链接；发生平台视觉降级（如复杂块转图片、外链转脚注）时必须保留原始替代文本与可定位诊断。
 - **单一设计变量与可扩展样式边界**：配色、字体族、字号与间距等视觉属性统一由共享设计变量（Design Tokens）与用户自定义 CSS 覆盖层在各视图能力边界内驱动，禁止将单一视图硬编码为不可调节的死板模板。
 - **预览与交付快照一致性**：同一文档、样式与资源版本生成唯一的版本化交付快照，右侧 Tab 预览所呈现的排版、多比例分页、列表缩进、内嵌图片与代码高亮，必须与最终全文复制、右栏自由框选复制（`Cmd/Ctrl + C`）及卡片导出的交付结构与布局保持一致。
+- **官方校验器基线锁定（Verifier Baseline Lock）**：`tests/verifiers/wechat/`（及 `tests/verifiers/` 下的平台结构校验器）为外部官方规范的只读验收裁判基线，已通过 Git 钩子与项目红线封存，严禁任何 Agent 修改、删除、降级或绕过其中的代码与规则逻辑。
 - **架构与决策入口**：全局架构现状详见 [docs/architecture/overview.md](docs/architecture/overview.md)，核心架构权衡与模块选型详见 [ADR-0002](docs/adr/0002-isomorphic-delivery-snapshot-and-asset-pipeline.md)。
