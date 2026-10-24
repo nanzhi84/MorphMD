@@ -63,31 +63,36 @@ function collectWhitelistAttributes(opts?: DarkmodeRunOptions): string[] {
   return attrs;
 }
 
-// reset: clear the darkmode data attributes the run stamped on nodes, and reset
-// the library's init-guard so a subsequent run works. Each verifyArticleStructure
-// call runs in an isolated page, so this primarily clears node-side state.
+// reset: clear the darkmode data attributes and JS expando markers the run
+// stamped on nodes, and invoke mp-darkmode's public reset() API so subsequent
+// runs on the same DOM nodes do not read stale markers.
 function reset(nodes: Node[] | NodeListOf<Element>, _opts?: DarkmodeRunOptions): void {
+  const nodeArray = Array.from(nodes as ArrayLike<Element>) as Element[];
   try {
-    // Reset internal init state if reachable (vanilla exposes init but not a public
-    // reset; the hasInit flag lives on an internal config object). Best-effort.
-    (Darkmode as any).resetCss?.();
+    (Darkmode as any).reset?.(nodeArray);
   } catch { /* no-op */ }
 
   const html = document.getElementsByTagName('html')[0];
   html?.classList.remove('js_darkmode__');
 
-  (Array.from(nodes as ArrayLike<Element>) as Element[]).forEach(node => {
+  nodeArray.forEach(node => {
     if (!(node instanceof HTMLElement)) return;
     const toRemove: string[] = [];
     for (let i = 0; i < node.attributes.length; i++) {
       const name = node.attributes[i].name;
       if (DARK_COLOR_ATTR.test(name) || DARK_BG_ATTR.test(name) || DARK_ORIG_BG_ATTR.test(name)
-        || DARK_BGIMAGE_ATTR.test(name) || /^data-darkmode-original-color-/.test(name)
+        || DARK_BGIMAGE_ATTR.test(name) || DARK_BGGRADIENT_ATTR.test(name)
+        || /^data-darkmode-original-color-/.test(name)
         || /^data-darkmode-complementary-bgimagecolor-/.test(name)) {
         toRemove.push(name);
       }
     }
     toRemove.forEach(n => node.removeAttribute(n));
+    for (const key of Object.keys(node as any)) {
+      if (key.startsWith('data-darkmode-')) {
+        delete (node as any)[key];
+      }
+    }
   });
 }
 

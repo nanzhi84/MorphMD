@@ -1,4 +1,4 @@
-import { parseDocument } from '../dom/env';
+import { parseDocument } from '../../../src/core/dom/env';
 import { xArticlePropertyRules } from './rules-text';
 import type {
   DraftBlockType,
@@ -69,7 +69,7 @@ function isValidHttpsImageSrc(src: string): boolean {
 }
 
 function isValidRasterDataUrl(src: string): boolean {
-  return /^data:image\/(?:svg\+xml|png|jpeg|webp)[;,]/i.test(src);
+  return /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/i.test(src);
 }
 
 function isSafeLinkHref(href: string): boolean {
@@ -339,14 +339,23 @@ export function verifyXArticleStructure(
   });
 
   // 3. #1.3 unrasterized-table: raw <table> or orphan table cells
-  root.querySelectorAll('table').forEach((table) => {
+  const tableContainers = new Set<Element>();
+  root.querySelectorAll('table, thead, tbody, tfoot, tr, th, td').forEach((tableNode) => {
+    const container =
+      tableNode.closest('table') ||
+      tableNode.closest('thead, tbody, tfoot') ||
+      tableNode.closest('tr') ||
+      tableNode;
+    tableContainers.add(container);
+  });
+  for (const tableEl of tableContainers) {
     addViolation('unrasterized-table', {
-      blockIndex: resolveBlockIndex(table),
-      outerHTML: table.outerHTML,
-      tagName: 'table',
+      blockIndex: resolveBlockIndex(tableEl),
+      outerHTML: tableEl.outerHTML,
+      tagName: tableEl.tagName.toLowerCase(),
       rules: xArticlePropertyRules['unrasterized-table'],
     });
-  });
+  }
 
   // 4. #2.1 unrasterized-math: raw <math>, .katex, .katex-mathml, .katex-html
   const mathContainers = new Set<Element>();
@@ -419,10 +428,7 @@ export function verifyXArticleStructure(
     // #2.3 unsafe-media-or-link on <img>
     if (tag === 'img') {
       const src = (el.getAttribute('src') || '').trim();
-      const isRasterized = el.getAttribute('data-morph-rasterized') === 'true';
-      const valid = isRasterized
-        ? isValidRasterDataUrl(src) || isValidHttpsImageSrc(src)
-        : isValidHttpsImageSrc(src);
+      const valid = isValidRasterDataUrl(src) || isValidHttpsImageSrc(src);
 
       if (!valid) {
         addViolation('unsafe-media-or-link', {
@@ -443,6 +449,19 @@ export function verifyXArticleStructure(
           outerHTML: el.outerHTML,
           tagName: 'a',
           rules: `超链接 href 协议不安全 (${href.slice(0, 48)})：${xArticlePropertyRules['unsafe-media-or-link']}`,
+        });
+      }
+    }
+
+    // Inline event handler attributes (onclick, onerror, onload, etc.)
+    const attrNames = typeof el.getAttributeNames === 'function' ? el.getAttributeNames() : [];
+    for (const attrName of attrNames) {
+      if (/^on[a-z]+/i.test(attrName)) {
+        addViolation('unsafe-media-or-link', {
+          blockIndex: resolveBlockIndex(el),
+          outerHTML: el.outerHTML,
+          tagName: tag,
+          rules: `危险的内联事件属性 ${attrName}：${xArticlePropertyRules['unsafe-media-or-link']}`,
         });
       }
     }

@@ -1,10 +1,231 @@
 import type { DiagnosticItem } from '../snapshot/types';
-import { deleteNestNode } from './verify-engine/nest';
 
 const BLOCK_ELEMENT_SELECTOR = 'section, div, p, h1, h2, h3, h4, h5, h6, ul, ol, li, table, blockquote, pre';
 const DISALLOWED_NODELEAF_CHILD_TAGS = new Set([
   'section', 'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'blockquote', 'pre',
 ]);
+const SPECIAL_NEST_TAGS = /iframe|video|audio|cps|mp|img|animateTransform|hr|path|br|svg|^g$|^a$/i;
+
+function getElementChildren(node: any): any[] {
+  if (!node || !node.children) return [];
+  const children = node.children;
+  if (typeof children.item === 'function') return children;
+  return children.filter((c: any) => !!c.tagName);
+}
+
+function hasOtherSignificantContent(node: any, excludeChild: any): boolean {
+  if (!node) return false;
+  if (node.childNodes && typeof node.childNodes.item === 'function') {
+    for (let i = 0; i < node.childNodes.length; i++) {
+      const child = node.childNodes[i];
+      if (child === excludeChild) continue;
+      if (child.nodeType === 3 && child.textContent && child.textContent.trim()) return true;
+      if (child.nodeType === 1) return true;
+    }
+    return false;
+  }
+  if (node.children && Array.isArray(node.children)) {
+    for (let j = 0; j < node.children.length; j++) {
+      const c = node.children[j];
+      if (c === excludeChild) continue;
+      if (!c.tagName && c.data && c.data.trim()) return true;
+      if (c.tagName) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+function deleteNestNode({ root, isNeedDelete = false, isTest = false }: { root: any; isNeedDelete?: boolean; isTest?: boolean }): any[] | undefined {
+  const MAX_STYLE_LEVEL = 15;
+  const hasNestedNode: any[] = [];
+  const willBeDeletedNodes: any[] = [];
+  const willBeDeletedSet = new Set<any>();
+  const pushWillBeDeleted = (node: any): boolean => {
+    if (!node || willBeDeletedSet.has(node)) return false;
+    willBeDeletedSet.add(node);
+    willBeDeletedNodes.push(node);
+    return true;
+  };
+
+  const getTag = (node: any): string => ((node && node.tagName) || '').toLowerCase();
+  const getStyle = (node: any): string => {
+    if (!node) return '';
+    if (node.attrs && typeof node.attrs.style === 'string') return node.attrs.style;
+    if (typeof node.getAttribute === 'function') return node.getAttribute('style') || '';
+    return '';
+  };
+
+  const clearTempMarkers = (node: any) => {
+    if (!node) return;
+    delete node.isNeedEmpty;
+    delete node.level;
+    const children = getElementChildren(node);
+    for (let i = 0; i < children.length; i++) clearTempMarkers(children[i]);
+  };
+  clearTempMarkers(root);
+
+  const depth1 = (node: any) => {
+    if (node === null) return;
+    if (node.children) {
+      node.level = node.parentNode && node.parentNode.level ? node.parentNode.level + 1 : 1;
+      if (node.attrs) node.attrs['data-nest-level'] = String(node.level);
+      if (typeof node.setAttribute === 'function') node.setAttribute('data-nest-level', String(node.level));
+      if (node.level >= MAX_STYLE_LEVEL) {
+        hasNestedNode.push(node);
+        return;
+      }
+    }
+    const children = getElementChildren(node);
+    for (let i = 0; i < children.length; i++) depth1(children[i]);
+  };
+  root.level = 0;
+  depth1(root);
+
+  if (hasNestedNode.length > 0 && (isNeedDelete || isTest)) {
+    hasNestedNode.forEach(item => {
+      let deleteLevel = MAX_STYLE_LEVEL - 2;
+      let currentNode = item;
+
+      let tagList: string[] = [];
+      let styleDetailList: string[] = [];
+      let parentStyleDetailList: string[] = [];
+
+      const parentHasTag = (tagName: string): boolean => {
+        let result = true;
+        if (!tagList.includes(tagName)) {
+          tagList.push(tagName);
+          result = false;
+        }
+        return result;
+      };
+
+      const parentHasStyle = (str: string = '', isParentNode = false): boolean => {
+        const allStyle = str.split(';');
+        let result = true;
+        if (isParentNode) {
+          allStyle.forEach(s => {
+            if (!parentStyleDetailList.includes(s)) {
+              result = false;
+              parentStyleDetailList.push(s);
+            }
+          });
+        } else {
+          allStyle.forEach(s => {
+            if (!styleDetailList.includes(s) && !parentStyleDetailList.includes(s)) {
+              result = false;
+              styleDetailList.push(s);
+            }
+          });
+        }
+        return result;
+      };
+
+      while (deleteLevel) {
+        const grandParent = currentNode.parentNode && currentNode.parentNode.parentNode;
+        const gpChildren = grandParent ? getElementChildren(grandParent) : [];
+        const gpChildrenLen = gpChildren.length;
+
+        if (currentNode.parentNode && grandParent && gpChildrenLen === 1) {
+          const nodeTagName = getTag(currentNode.parentNode);
+          const nodeStyle = getStyle(currentNode.parentNode);
+
+          if (!parentHasTag(nodeTagName) || (parentHasTag(nodeTagName) && !parentHasStyle(nodeStyle, true))) {
+            currentNode = currentNode.parentNode;
+          } else {
+            if (!SPECIAL_NEST_TAGS.test(nodeTagName)) {
+              if (!isTest) {
+                const deletedNode = currentNode.parentNode;
+                if (hasOtherSignificantContent(deletedNode, currentNode)) {
+                  currentNode = currentNode.parentNode;
+                  deleteLevel -= 1;
+                  continue;
+                }
+                const grandParentNode = currentNode.parentNode.parentNode;
+                if (grandParentNode.replaceChild) {
+                  grandParentNode.replaceChild(currentNode, deletedNode);
+                } else {
+                  currentNode.parentNode = grandParentNode;
+                  grandParentNode.children[grandParentNode.children.indexOf(deletedNode)] = currentNode;
+                }
+              } else {
+                pushWillBeDeleted(currentNode.parentNode);
+                return;
+              }
+            }
+          }
+        }
+        deleteLevel -= 1;
+      }
+
+      currentNode = item;
+      const stack: any[] = [currentNode];
+
+      while (stack.length) {
+        const downNode = stack.pop();
+        if (downNode.isNeedEmpty) {
+          tagList = [];
+          styleDetailList = [];
+        }
+        const downChildren = getElementChildren(downNode);
+        const downChildrenLen = downChildren.length;
+
+        if (downChildrenLen === 1) {
+          const child = downChildren[0];
+          const childChildren = getElementChildren(child);
+          const childChildrenLen = childChildren.length;
+
+          if (childChildrenLen === 1) {
+            const grandChild = childChildren[0];
+            const gcChildren = getElementChildren(grandChild);
+            const gcChildrenLen = gcChildren.length;
+
+            if (gcChildrenLen > 0) {
+              const nodeTagName = getTag(child);
+              const nodeStyle = getStyle(child);
+              if (!parentHasTag(nodeTagName) || (parentHasTag(nodeTagName) && !parentHasStyle(nodeStyle))) {
+                stack.push(child);
+              } else {
+                if (!SPECIAL_NEST_TAGS.test(nodeTagName)) {
+                  if (!isTest) {
+                    if (hasOtherSignificantContent(child, childChildren[0])) {
+                      stack.push(child);
+                      continue;
+                    }
+                    const tmp = childChildren[0];
+                    if (downNode.replaceChild) {
+                      downNode.replaceChild(tmp, child);
+                    } else {
+                      downNode.children[downNode.children.indexOf(child)] = tmp;
+                      tmp.parentNode = downNode;
+                    }
+                    stack.push(downNode);
+                  } else {
+                    pushWillBeDeleted(child);
+                    return;
+                  }
+                }
+              }
+            }
+          } else if (childChildrenLen > 1) {
+            for (let i = childChildrenLen - 1; i >= 0; i--) {
+              childChildren[i].isNeedEmpty = true;
+              stack.push(childChildren[i]);
+            }
+          }
+        } else if (downChildrenLen > 1) {
+          for (let i = downChildrenLen - 1; i >= 0; i--) {
+            downChildren[i].isNeedEmpty = true;
+            stack.push(downChildren[i]);
+          }
+        }
+      }
+    });
+  }
+
+  clearTempMarkers(root);
+  if (isTest) return willBeDeletedNodes;
+}
 
 function hasVisibleText(el: Element): boolean {
   const raw = el.textContent || '';
@@ -70,6 +291,35 @@ function isOverlappingLineHeight(lhRaw: string, fontSizePx: number): boolean {
     return Number.isFinite(ptPx) && ptPx < fontSizePx * 0.96;
   }
   return false;
+}
+
+function isUnsafeFixedWidth(wRaw: string): boolean {
+  const w = wRaw.trim();
+  if (!w || /^(auto|100%)$/i.test(w)) return false;
+  if (/^(\d+(?:\.\d+)?|\.\d+)%$/.test(w)) {
+    const pct = parseFloat(w);
+    return !Number.isFinite(pct) || pct <= 0 || pct > 100;
+  }
+  if (/^(\d+(?:\.\d+)?|\.\d+)px$/i.test(w)) {
+    const px = parseFloat(w);
+    return !Number.isFinite(px) || px <= 0 || px >= 375;
+  }
+  if (/^(\d+(?:\.\d+)?|\.\d+)pt$/i.test(w)) {
+    const px = parseFloat(w) * (4 / 3);
+    return !Number.isFinite(px) || px <= 0 || px >= 375;
+  }
+  return true;
+}
+
+function getEffectiveOverflowAxis(style: CSSStyleDeclaration, axis: 'x' | 'y'): string {
+  const direct = style.getPropertyValue(`overflow-${axis}`).trim().toLowerCase();
+  if (direct) return direct;
+  const shorthand = style.getPropertyValue('overflow').trim().toLowerCase();
+  if (!shorthand) return '';
+  const tokens = shorthand.split(/\s+/).filter(Boolean);
+  if (tokens.length === 1) return tokens[0];
+  if (tokens.length >= 2) return axis === 'x' ? tokens[0] : tokens[1];
+  return '';
 }
 
 function isExcessiveHorizontalMargin(valRaw: string): boolean {
@@ -227,10 +477,25 @@ export function normalizeWeChatStructureAndStyles(
 
     // #1.8 <pre> horizontal scroll safeguard
     if (tag === 'pre' && hasVisibleText(el) && canSetProp('overflow-x')) {
-      const ox = style.getPropertyValue('overflow-x').trim().toLowerCase();
+      const ox = getEffectiveOverflowAxis(style, 'x');
       const ws = style.getPropertyValue('white-space').trim().toLowerCase();
       if (ox !== 'auto' && ox !== 'scroll' && ws !== 'pre-wrap' && ws !== 'normal') {
         style.setProperty('overflow-x', 'auto');
+      }
+    }
+
+    // #1.7 SVG animate/animateTransform/animateMotion begin="touchstart" safeguard
+    if (tag === 'animate' || tag === 'animatetransform' || tag === 'animatemotion') {
+      const beginAttr = el.getAttribute('begin');
+      if (beginAttr && /\btouchstart\b/i.test(beginAttr) && !/\bclick\b/i.test(beginAttr)) {
+        const normalizedBegin = `${beginAttr.trim().replace(/;+\s*$/, '')}; click`;
+        el.setAttribute('begin', normalizedBegin);
+        diagnostics.push({
+          code: 'structure/wechat-animate-begin-click',
+          message: `Appended click trigger to SVG <${tag} begin="${beginAttr}"> for WeChat PC compatibility (#1.7 begin).`,
+          severity: 'warning',
+          targetId: 'wechat',
+        });
       }
     }
 
@@ -311,7 +576,7 @@ export function normalizeWeChatStructureAndStyles(
 
     if (!ignoresWidth && tag !== 'img' && tag !== 'svg' && !isInsideSvgContext(el) && !isInsideKatexLayout(el)) {
       const w = style.getPropertyValue('width').trim();
-      if (w && !/^(auto|100%)$/i.test(w)) {
+      if (w && isUnsafeFixedWidth(w)) {
         style.removeProperty('width');
         diagnostics.push({
           code: 'style/wechat-fixed-width',
@@ -341,7 +606,7 @@ export function normalizeWeChatStructureAndStyles(
     const h = style.getPropertyValue('height').trim();
     if (h && !/^auto$/i.test(h) && tag !== 'img' && tag !== 'svg' && !isInsideSvgContext(el) && !isInsideKatexLayout(el)) {
       const isZeroHeight = /^0(?:px|em|rem|%|pt)?$/i.test(h);
-      const overflowY = style.getPropertyValue('overflow-y').trim().toLowerCase();
+      const overflowY = getEffectiveOverflowAxis(style, 'y');
       const canScrollY = overflowY === 'auto' || overflowY === 'scroll';
       if ((isZeroHeight && hasVisibleText(el)) || (!isZeroHeight && !canScrollY && (hasVisibleText(el) || el.children.length > 0))) {
         style.removeProperty('height');

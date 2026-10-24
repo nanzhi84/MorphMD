@@ -1,28 +1,66 @@
+import { deflateSync } from 'node:zlib';
 import type { AdapterCapabilities, DiagnosticItem } from '../snapshot/types';
 
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-function createTextCardSvgDataUrl(lines: string[], width = 680): string {
+function createRasterPngDataUrl(lines: string[], width = 680): string {
   const rowHeight = 28;
   const padding = 16;
-  const height = Math.max(56, lines.length * rowHeight + padding * 2);
-  const textNodes = lines
-    .map(
-      (line, idx) =>
-        `<text x="${padding}" y="${padding + 20 + idx * rowHeight}" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" fill="#0f1419">${escapeXml(
-          line.slice(0, 120)
-        )}</text>`
-    )
-    .join('');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" rx="8" fill="#f7f9f9" stroke="#cfd9de" stroke-width="1"/>${textNodes}</svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  const w = Math.max(64, Math.min(1200, Math.round(width)));
+  const h = Math.max(56, Math.min(1200, lines.length * rowHeight + padding * 2));
+
+  function chunk(type: string, data: Buffer): Buffer {
+    const payload = Buffer.concat([Buffer.from(type), data]);
+    let crc = 0xffffffff;
+    for (const byte of payload) {
+      crc ^= byte;
+      for (let i = 0; i < 8; i++) {
+        crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+      }
+    }
+    const size = Buffer.alloc(4);
+    size.writeUInt32BE(data.length);
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
+    return Buffer.concat([size, payload, checksum]);
+  }
+
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(w, 0);
+  header.writeUInt32BE(h, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // RGB
+
+  const rowStride = w * 3 + 1;
+  const rows = Buffer.alloc(rowStride * h);
+  for (let y = 0; y < h; y++) {
+    const rowStart = y * rowStride;
+    rows[rowStart] = 0; // filter None
+    const isBorder = y === 0 || y === h - 1;
+    const isAccentBar = !isBorder && y >= padding && y < h - padding;
+    for (let x = 0; x < w; x++) {
+      const px = rowStart + 1 + x * 3;
+      if (isBorder || x === 0 || x === w - 1) {
+        rows[px] = 207;
+        rows[px + 1] = 217;
+        rows[px + 2] = 222;
+      } else if (isAccentBar && x >= padding && x < padding + 4) {
+        rows[px] = 29;
+        rows[px + 1] = 155;
+        rows[px + 2] = 240;
+      } else {
+        rows[px] = 247;
+        rows[px + 1] = 249;
+        rows[px + 2] = 249;
+      }
+    }
+  }
+
+  const pngBuffer = Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(rows)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+  return `data:image/png;base64,${pngBuffer.toString('base64')}`;
 }
 
 function extractTableSummaryLines(table: Element): string[] {
@@ -144,7 +182,7 @@ export function normalizeXArticleStructureAndStyles(
       const sourceRange = table.getAttribute('data-source-range');
       const lines = extractTableSummaryLines(table);
       const altText = lines.join(' ; ');
-      const dataUrl = createTextCardSvgDataUrl(lines, 680);
+      const dataUrl = createRasterPngDataUrl(lines, 680);
 
       const wrapperP = doc.createElement('p');
       wrapperP.className = 'morph-p';
@@ -205,7 +243,7 @@ export function normalizeXArticleStructureAndStyles(
         mathEl.tagName.toLowerCase() === 'div' ||
         Boolean(mathEl.querySelector('.katex-display'));
 
-      const dataUrl = createTextCardSvgDataUrl([tex], isDisplay ? 600 : Math.max(120, tex.length * 12 + 32));
+      const dataUrl = createRasterPngDataUrl([tex], isDisplay ? 600 : Math.max(120, tex.length * 12 + 32));
       const img = doc.createElement('img');
       img.className = 'morph-img morph-raster-img';
       img.setAttribute('data-morph-rasterized', 'true');
@@ -239,9 +277,9 @@ export function normalizeXArticleStructureAndStyles(
   if (rasterizeSvg) {
     const svgs = Array.from(rootContainer.querySelectorAll('svg'));
     for (const svg of svgs) {
-      const serialized = svg.outerHTML;
-      const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(serialized)}`;
       const alt = svg.getAttribute('aria-label') || 'SVG Graphic';
+      const svgW = parseFloat(svg.getAttribute('width') || '') || 320;
+      const dataUrl = createRasterPngDataUrl([alt], svgW);
       const img = doc.createElement('img');
       img.className = 'morph-img morph-raster-img';
       img.setAttribute('data-morph-rasterized', 'true');

@@ -8,8 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "verify:core": "tsx scripts/verify-core.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.0",

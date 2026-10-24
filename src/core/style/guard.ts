@@ -63,7 +63,7 @@ export function getDefaultCapabilities(targetId: TargetId): AdapterCapabilities 
           'span', 'strong', 'em', 'a', 'img', 'hr', 'br',
         ]),
         rasterizeBlocks: new Set(['table', 'math', 'code', 'svg']),
-        imageTransport: 'remote-https',
+        imageTransport: 'inline-data-url',
       };
 
     case 'cards':
