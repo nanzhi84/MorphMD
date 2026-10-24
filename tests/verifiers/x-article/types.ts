@@ -8,7 +8,25 @@ export type DraftBlockType =
   | 'code-block'
   | 'atomic';
 
-export type DraftInlineStyle = 'BOLD' | 'ITALIC' | 'STRIKETHROUGH' | 'CODE';
+export type DraftInlineStyle =
+  | 'BOLD'
+  | 'ITALIC'
+  | 'UNDERLINE'
+  | 'STRIKETHROUGH'
+  | 'CODE';
+
+export type XArticleRuleKey =
+  | 'heading-level'
+  | 'callout-structure'
+  | 'unrasterized-table'
+  | 'unsupported-element'
+  | 'unrasterized-math'
+  | 'unrasterized-svg'
+  | 'unsafe-media-or-link'
+  | 'native-inline-style'
+  | 'list-depth-exceeded'
+  | 'entity-conflict'
+  | 'content-loss';
 
 export interface DraftJsInlineStyleRange {
   offset: number;
@@ -43,6 +61,8 @@ export interface XArticleViolationItem {
   outerHTML: string;
   rules: string;
   tagName?: string;
+  nodeId?: string;
+  sourceRange?: string;
 }
 
 export interface XArticleViolationEntry {
@@ -56,11 +76,15 @@ export interface XArticleVerifyOpts {
    * as declared raster candidates. Defaults to true.
    */
   allowCodeBlockStyles?: boolean;
+  /**
+   * Maximum allowed list nesting depth (0-indexed). Draft.js RichUtils defaults to 4.
+   */
+  maxListDepth?: number;
 }
 
 export interface XArticleVerifyResult {
   isValid: boolean;
-  inValidInfo: Record<string, XArticleViolationEntry>;
+  inValidInfo: Partial<Record<XArticleRuleKey, XArticleViolationEntry>> & Record<string, XArticleViolationEntry>;
   draftState: {
     blocks: DraftJsSimulatedBlock[];
     entityMap: Record<number, DraftJsSimulatedEntity>;
