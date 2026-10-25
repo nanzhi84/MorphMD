@@ -8,6 +8,7 @@ import type { DesignTokens } from '../style/tokens';
 import { parseDocument } from '../dom/env';
 import { dedupeWeChatNesting } from '../wechat/normalizer';
 import { normalizeXArticleStructureAndStyles } from '../x-article/normalizer';
+import { paginateDom, type CardsPaginationOptions } from '../cards';
 import type {
   DeliverySnapshot,
   TargetId,
@@ -33,6 +34,7 @@ export interface SnapshotOptions {
     assets: number;
   };
   compileOptions?: CompileOptions;
+  cardsOptions?: CardsPaginationOptions;
 }
 
 function deepFreeze<T>(obj: T): T {
@@ -341,6 +343,8 @@ function finalizeSnapshot(
       dedupeWeChatNesting(root, allDiagnostics);
     } else if (targetId === 'x-article') {
       normalizeXArticleStructureAndStyles(root, allDiagnostics, capabilities);
+    } else if (targetId === 'cards') {
+      paginateDom(root as HTMLElement, allDiagnostics, options.cardsOptions);
     }
 
     const finalHtml = (root.parentElement && root.parentElement.tagName.toLowerCase() !== 'body')
