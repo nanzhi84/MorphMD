@@ -13,13 +13,12 @@ const DANGEROUS_TAGS = new Set([
   'base',
   'form',
   'applet',
-  'animate',
   'set',
-  'animatetransform',
-  'animatemotion',
   'discard',
   'foreignobject',
 ]);
+
+const SVG_ANIMATION_TAGS = new Set(['animate', 'animatetransform', 'animatemotion']);
 
 const DANGEROUS_PROTOCOLS = ['javascript:', 'vbscript:', 'data:text/html'];
 
@@ -189,6 +188,20 @@ export function sanitizeHast(
           });
           parent.children.splice(i, 1);
           continue;
+        }
+
+        if (SVG_ANIMATION_TAGS.has(tag)) {
+          const props = (child.properties || {}) as Record<string, unknown>;
+          const attrName = String(props.attributeName || props.attributename || '').trim().toLowerCase();
+          if (/^(?:href|xlink:href|src|action|formaction|data|on[a-z]+)$/i.test(attrName)) {
+            diagnostics.push({
+              code: 'security/disallowed-tag',
+              message: `Disallowed SVG animation targeting "${attrName}" stripped for security.`,
+              severity: 'error',
+            });
+            parent.children.splice(i, 1);
+            continue;
+          }
         }
 
         sanitizeElement(child, diagnostics);

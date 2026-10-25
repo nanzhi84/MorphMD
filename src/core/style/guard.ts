@@ -85,7 +85,7 @@ export function getDefaultCapabilities(targetId: TargetId): AdapterCapabilities 
 }
 
 export function guardTargetCapabilities(
-  _customCssAstProps: Set<string>,
+  customCssAstProps: Set<string>,
   capabilities: AdapterCapabilities,
   tokensOverride?: Record<string, string>
 ): DiagnosticItem[] {
@@ -96,7 +96,15 @@ export function guardTargetCapabilities(
       diagnostics.push({
         code: 'style/platform-unsupported-tokens',
         message: `Custom design tokens cannot take effect on native text in ${capabilities.targetId}.`,
-        severity: 'info',
+        severity: 'warning',
+        targetId: capabilities.targetId,
+      });
+    }
+    if (customCssAstProps && customCssAstProps.size > 0) {
+      diagnostics.push({
+        code: 'style/platform-unsupported-custom-css',
+        message: `Custom CSS rules cannot be inlined on native blocks in ${capabilities.targetId}.`,
+        severity: 'warning',
         targetId: capabilities.targetId,
       });
     }

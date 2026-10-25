@@ -455,6 +455,32 @@ export function normalizeWeChatStructureAndStyles(
     }
   });
 
+  // 2.5 Structure Rule #2.4: redundant-node (> 20 children with > 15 empty children)
+  const containersForRedundantCheck = [rootContainer, ...Array.from(rootContainer.querySelectorAll('*'))];
+  for (const container of containersForRedundantCheck) {
+    if (container.children.length > 20) {
+      const children = Array.from(container.children);
+      const emptyChildren = children.filter((child) => {
+        const tag = child.tagName.toLowerCase();
+        if (/^(?:img|svg|hr|br|video|audio|iframe|canvas|mp|cps)$/.test(tag)) return false;
+        if (hasVisibleText(child)) return false;
+        if (child.querySelector('img, svg, hr, br, video, audio, iframe, canvas, mp, cps')) return false;
+        return true;
+      });
+      if (emptyChildren.length > 15) {
+        for (const emptyChild of emptyChildren) {
+          emptyChild.remove();
+        }
+        diagnostics.push({
+          code: 'structure/wechat-redundant-empty-nodes',
+          message: `Removed ${emptyChildren.length} redundant empty child nodes from <${container.tagName.toLowerCase()}> (#2.4 redundant-node).`,
+          severity: 'warning',
+          targetId: 'wechat',
+        });
+      }
+    }
+  }
+
   // 3. Dark Mode Rule #4.5.1: data-no-dark whitelist attribute
   const allElements = [rootContainer, ...Array.from(rootContainer.querySelectorAll('*'))];
   for (const el of allElements) {
@@ -546,6 +572,27 @@ export function normalizeWeChatStructureAndStyles(
         targetId: 'wechat',
         property: 'text-align',
       });
+    }
+
+    // #3 font-family: ensure WeChat-compatible system font prefix
+    const ff = style.getPropertyValue('font-family').trim();
+    if (ff) {
+      const normalizedFf = ff.replace(/["']/g, '').replace(/\s+/g, ' ').trim();
+      const wechatFontPrefix = 'mp-quote, PingFang SC, system-ui, -apple-system';
+      if (!normalizedFf.startsWith(wechatFontPrefix)) {
+        if (canSetProp('font-family')) {
+          style.setProperty('font-family', `"mp-quote", PingFang SC, system-ui, -apple-system, ${ff}`);
+        } else {
+          style.removeProperty('font-family');
+        }
+        diagnostics.push({
+          code: 'style/wechat-font-family-normalized',
+          message: `Normalized font-family (${ff}) to WeChat-compatible system font stack (#3 font-family).`,
+          severity: 'warning',
+          targetId: 'wechat',
+          property: 'font-family',
+        });
+      }
     }
 
     // #1.3 line-height overlap

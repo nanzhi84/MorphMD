@@ -83,6 +83,26 @@ export function compileMarkdownSync(
   return runCompile(markdown, options, highlighter, highlighter === null);
 }
 
+function normalizeOrphanTableHtml() {
+  return (tree: any) => {
+    let tableDepth = 0;
+    visit(tree, 'html', (node: { value?: string }) => {
+      const val = typeof node.value === 'string' ? node.value : '';
+      if (!val) return;
+      const openTables = (val.match(/<table\b/gi) || []).length;
+      const closeTables = (val.match(/<\/table\s*>/gi) || []).length;
+      if (tableDepth === 0 && openTables === 0) {
+        if (/^\s*<(?:thead|tbody|tfoot|tr)\b/i.test(val)) {
+          node.value = `<table>${val}</table>`;
+        } else if (/^\s*<(?:td|th)\b/i.test(val)) {
+          node.value = `<table><tbody><tr>${val}</tr></tbody></table>`;
+        }
+      }
+      tableDepth = Math.max(0, tableDepth + openTables - closeTables);
+    });
+  };
+}
+
 function runCompile(
   markdown: string,
   options: CompileOptions,
@@ -96,6 +116,7 @@ function runCompile(
     .use(remarkParse)
     .use(remarkGfm)
     .use(remarkMath)
+    .use(normalizeOrphanTableHtml)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw);
 

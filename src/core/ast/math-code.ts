@@ -174,7 +174,10 @@ export function transformMathAndCode(
 
         const langMatch = classList.find((c) => c.startsWith('language-'));
         const lang = langMatch ? langMatch.replace('language-', '') : '';
-        const rawCode = extractRawText(codeChild);
+        const rawCode = extractRawText(node);
+        const extraMediaChildren = node.children.filter(
+          (c): c is Element => c.type === 'element' && c.tagName === 'img'
+        );
         const contentHash = hashString(rawCode);
 
         const isSupportedTheme = SUPPORTED_THEMES.includes(themeKey as BundledTheme);
@@ -286,6 +289,9 @@ export function transformMathAndCode(
         }
 
         const codeNodeClone: Element = JSON.parse(JSON.stringify(codeHast));
+        if (extraMediaChildren.length > 0) {
+          codeNodeClone.children.push(...extraMediaChildren);
+        }
         codeNodeClone.position = node.position;
         parent.children[index] = codeNodeClone;
       }

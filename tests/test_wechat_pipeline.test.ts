@@ -7,8 +7,19 @@ import {
 } from '../src/index';
 import {
   createWeChatVerificationSession,
+  propertyRules,
   type WeChatVerificationSession,
 } from './verifiers/wechat/index';
+import { isEmptyParagraph } from './verifiers/wechat/verify-engine/dom';
+import { getCleanOuterHTML } from './verifiers/wechat/verify-engine/layout';
+import {
+  checkFontFamilyViolation,
+  getInlineStyleValue,
+  isTransparentRgba,
+  type PropertyMaps,
+  type RuleCandidate,
+  type RuleContext,
+} from './verifiers/wechat/verify-engine/rules/index';
 
 /**
  * 构造真实可解码的 PNG 二进制数据
@@ -71,6 +82,49 @@ async function decodeBitmapDataUrl(
       return { decoded: false, width: 0, height: 0 };
     }
   }, src);
+}
+
+/**
+ * 使用官方 #3 font-family 规则检查器扫描 HTML 片段中的非白名单字体违规
+ */
+async function collectFontFamilyViolations(page: Page, html: string): Promise<RuleCandidate[]> {
+  const elements = await page.evaluate((rawHtml) => {
+    const container = document.createElement('div');
+    container.innerHTML = rawHtml;
+    return Array.from(container.querySelectorAll('*')).map((el, idx) => ({
+      tagName: el.tagName.toLowerCase(),
+      style: el.getAttribute('style'),
+      outerHTML: el.outerHTML,
+      idx,
+    }));
+  }, html);
+
+  const ctx: RuleContext = {
+    getInlineStyleValue,
+    isTransparentRgba,
+    isEmptyParagraph,
+    getCleanOuterHTML,
+    propertyRules,
+    ensureViolationId: (_node, pIdx) => `font-violation-${pIdx}`,
+  };
+  const dummyMaps: PropertyMaps = {};
+  const violations: RuleCandidate[] = [];
+
+  for (const item of elements) {
+    const fakeNode = {
+      tagName: item.tagName,
+      outerHTML: item.outerHTML,
+      getAttribute(name: string) {
+        return name === 'style' ? item.style : null;
+      },
+      setAttribute() {},
+    };
+    const hit = checkFontFamilyViolation(fakeNode, item.idx, dummyMaps, item.tagName, ctx);
+    if (hit) {
+      violations.push(hit);
+    }
+  }
+  return violations;
 }
 
 describe('TestWeChatPipeline', () => {
@@ -219,13 +273,19 @@ describe('TestWeChatPipeline', () => {
 
     // 【前置校验】：先确认构造的原始违规片段在官方校验器中确实触发 #1.1 ~ #1.8 全部规则报警
     const rawViolatingHtml = [
-      '<p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" data-w="300" style="opacity: 0;" /></p>',
+      '<p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" data-w="300" style="opacity: 0;" /><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" data-w="300" style="opacity: 0.0;" /></p>',
       '<div class="bad-box" style="caret-color: rgba(0, 0, 0, 0); line-height: 0; width: 586px; text-align: start;">这是第一行文字<br>这是第二行文字<br>这是第三行文字</div>',
+      '<div class="bad-caret-transparent" style="caret-color: transparent;">透明光标关键词段落</div>',
       '<div class="bad-lh-small" style="font-size: 20px; line-height: 10px;">窄屏多行紧凑行高第一行文字用于触发Range重叠检测<br>窄屏多行紧凑行高第二行文字用于触发Range重叠检测</div>',
-      '<section class="bad-margin" style="margin-left: 294pt; text-align: end;"><span>这段文字设置了超大左边距会导致手机端水平溢出</span></section>',
+      '<div class="bad-lh-pct" style="font-size: 20px; line-height: 50%;">百分比紧凑行高第一行文字用于触发Range重叠检测<br>百分比紧凑行高第二行文字用于触发Range重叠检测</div>',
+      '<div class="bad-lh-em" style="font-size: 20px; line-height: 0.5em;">em单位紧凑行高第一行文字用于触发Range重叠检测<br>em单位紧凑行高第二行文字用于触发Range重叠检测</div>',
+      '<div class="bad-center-width" style="width: 420px; margin: 0 auto;">固定宽度配合margin自动居中容器</div>',
+      '<div class="bad-center-offset" style="width: 345px; margin-left: 120px;">跨屏居中状态不一致的偏移定宽容器</div>',
+      '<div class="bad-diff-width" style="width: 620px;">跨屏宽度与比例差异过大的定宽容器</div>',
+      '<section class="bad-margin" style="margin-left: 294pt; margin-right: -40px; text-align: end;"><span>这段文字设置了超大左边距与负右边距会导致手机端水平溢出</span></section>',
       '<section class="bad-height" style="height: 0px;"><span>这段文字由于父容器高度为0在移动端会完全消失</span></section>',
       '<section class="bad-height-overflow" style="height: 20px;"><div style="height: 120px;">这段内容高度远超父容器固定高度20px且无滚动条导致截断</div></section>',
-      '<svg viewBox="0 0 100 40"><circle cx="20" cy="20" r="10"><animate attributeName="opacity" values="1;0;1" dur="1s" begin="touchstart"></animate></circle></svg>',
+      '<svg viewBox="0 0 100 40"><circle cx="20" cy="20" r="10"><animate attributeName="opacity" values="1;0;1" dur="1s" begin="touchstart"></animate><animateTransform attributeName="transform" type="rotate" from="0" to="90" dur="1s" begin="touchstart"></animateTransform><animateMotion path="M 0 0 L 10 10" dur="1s" begin="touchstart"></animateMotion></circle></svg>',
       '<pre style="line-height: 1.75em;">这是一段直接手写的超长pre标签内容没有设置overflowX滚动属性在375px窄屏下必然发生水平截断违规</pre>',
     ].join('\n');
 
@@ -250,20 +310,34 @@ describe('TestWeChatPipeline', () => {
     expect(preCheckHeightOverflow.isValid).toBe(false);
     expect(Object.keys(preCheckHeightOverflow.inValidInfo)).toContain('height-nodisplay');
 
-    const preCheckAnimateTransform = await verifier.verifyHtml(
-      '<p>动画<svg viewBox="0 0 100 40" width="80" height="40"><rect width="10" height="10"><animateTransform attributeName="transform" type="rotate" from="0" to="90" dur="1s" begin="touchstart"></animateTransform></rect></svg></p>'
+    const preCheckAnimateMotion = await verifier.verifyHtml(
+      '<p>动画<svg viewBox="0 0 100 40" width="80" height="40"><circle cx="10" cy="10" r="5"><animateMotion path="M 0 0 L 20 20" dur="1s" begin="touchstart"></animateMotion></circle></svg></p>'
     );
-    expect(preCheckAnimateTransform.isValid).toBe(false);
-    expect(Object.keys(preCheckAnimateTransform.inValidInfo)).toContain('animate-begin');
+    expect(preCheckAnimateMotion.isValid).toBe(false);
+    expect(Object.keys(preCheckAnimateMotion.inValidInfo)).toContain('animate-begin');
 
     const markdown = [
       `![透明违禁图](morph-asset://${record.id})`,
       '',
+      `<img class="inline-zero-opacity" src="morph-asset://${record.id}" alt="浮点零透明图" style="opacity: 0.0;" />`,
+      '',
       '<div class="bad-box">这是第一行文字<br>这是第二行文字<br>这是第三行文字</div>',
+      '',
+      '<div class="bad-caret-transparent" style="caret-color: transparent;">透明光标关键词段落</div>',
       '',
       '<div class="bad-lh-small" style="font-size: 20px; line-height: 10px;">窄屏多行紧凑行高第一行文字用于触发Range重叠检测<br>窄屏多行紧凑行高第二行文字用于触发Range重叠检测</div>',
       '',
-      '<section class="bad-margin"><span>这段文字设置了超大左边距会导致手机端水平溢出</span></section>',
+      '<div class="bad-lh-pct" style="font-size: 20px; line-height: 50%;">百分比紧凑行高第一行文字用于触发Range重叠检测<br>百分比紧凑行高第二行文字用于触发Range重叠检测</div>',
+      '',
+      '<div class="bad-lh-em" style="font-size: 20px; line-height: 0.5em;">em单位紧凑行高第一行文字用于触发Range重叠检测<br>em单位紧凑行高第二行文字用于触发Range重叠检测</div>',
+      '',
+      '<div class="bad-center-width" style="width: 420px; margin: 0 auto;">固定宽度配合margin自动居中容器</div>',
+      '',
+      '<div class="bad-center-offset" style="width: 345px; margin-left: 120px;">跨屏居中状态不一致的偏移定宽容器</div>',
+      '',
+      '<div class="bad-diff-width" style="width: 620px;">跨屏宽度与比例差异过大的定宽容器</div>',
+      '',
+      '<section class="bad-margin"><span>这段文字设置了超大左边距与负右边距会导致手机端水平溢出</span></section>',
       '',
       '<section class="bad-height"><span>这段文字由于父容器高度为0在移动端会完全消失</span></section>',
       '',
@@ -271,11 +345,13 @@ describe('TestWeChatPipeline', () => {
       '',
       '<section class="good-scrollable-height" style="height: 60px; overflow: auto;"><div style="height: 120px;">带有overflow:auto简写的可滚动定高容器</div></section>',
       '',
+      '<section class="good-scroll-y-height" style="height: 70px; overflow-y: scroll;"><div style="height: 140px;">带有overflow-y:scroll的可滚动定高容器</div></section>',
+      '',
       '<section class="good-pct-width" style="width: 80%;"><span>合规的80%百分比宽度容器</span></section>',
       '',
       '<section class="good-small-px-width" style="width: 240px;"><span>小于375px窄屏的240px宽度容器</span></section>',
       '',
-      '<svg viewBox="0 0 100 40"><circle cx="20" cy="20" r="10"><animate attributeName="opacity" values="1;0;1" dur="1s" begin="touchstart"></animate></circle></svg>',
+      '<svg viewBox="0 0 100 40"><circle cx="20" cy="20" r="10"><animate attributeName="opacity" values="1;0;1" dur="1s" begin="touchstart"></animate><animateTransform attributeName="transform" type="rotate" from="0" to="90" dur="1s" begin="touchstart"></animateTransform><animateMotion path="M 0 0 L 10 10" dur="1s" begin="touchstart"></animateMotion></circle></svg>',
       '',
       '<pre style="line-height: 1.75em;">这是一段直接手写的超长pre标签内容没有设置overflowX滚动属性在375px窄屏下必然发生水平截断违规</pre>',
       '',
@@ -297,6 +373,7 @@ describe('TestWeChatPipeline', () => {
         }
         .bad-margin {
           margin-left: 294pt;
+          margin-right: -40px;
           text-align: end;
         }
         .bad-height {
@@ -310,39 +387,78 @@ describe('TestWeChatPipeline', () => {
       const inspect = await page.evaluate((html) => {
         const container = document.createElement('div');
         container.innerHTML = html;
+        const imgs = Array.from(container.querySelectorAll('img'));
         const badBox = container.querySelector('.bad-box') as HTMLElement | null;
+        const badCaretTransparent = container.querySelector('.bad-caret-transparent') as HTMLElement | null;
         const badMargin = container.querySelector('.bad-margin') as HTMLElement | null;
         const ignoredWidthEl = container.querySelector('[data-ignore-width]') as HTMLElement | null;
         const goodScrollableEl = container.querySelector('.good-scrollable-height') as HTMLElement | null;
+        const goodScrollYEl = container.querySelector('.good-scroll-y-height') as HTMLElement | null;
         const goodPctWidthEl = container.querySelector('.good-pct-width') as HTMLElement | null;
         const goodSmallPxWidthEl = container.querySelector('.good-small-px-width') as HTMLElement | null;
+        const animElements = Array.from(
+          container.querySelectorAll('animate, animateTransform, animateMotion')
+        );
         return {
           text: container.textContent || '',
+          imgs: imgs.map((img) => ({
+            src: img.getAttribute('src') || '',
+            alt: img.getAttribute('alt') || '',
+            opacity: img.style.opacity || '',
+          })),
           badBoxAlign: badBox?.style.textAlign || '',
+          badBoxCaret: badBox?.style.caretColor || '',
+          badCaretTransparentVal: badCaretTransparent?.style.caretColor || '',
           badMarginAlign: badMargin?.style.textAlign || '',
           ignoredWidth: ignoredWidthEl?.style.width || '',
           goodScrollableHeight: goodScrollableEl?.style.height || '',
+          goodScrollYHeight: goodScrollYEl?.style.height || '',
           goodPctWidth: goodPctWidthEl?.style.width || '',
           goodSmallPxWidth: goodSmallPxWidthEl?.style.width || '',
+          animBegins: animElements.map((el) => el.getAttribute('begin') || ''),
         };
       }, snapshot.html);
 
       expect(snapshot.ready).toBe(true);
-      // 1. 全部正文语义完整保留
+      // 1. 全部正文语义与图片替代文本完整保留，图片恢复可见且可解码
       expect(inspect.text).toContain('这是第一行文字');
+      expect(inspect.text).toContain('透明光标关键词段落');
       expect(inspect.text).toContain('窄屏多行紧凑行高第一行文字');
-      expect(inspect.text).toContain('这段文字设置了超大左边距会导致手机端水平溢出');
+      expect(inspect.text).toContain('百分比紧凑行高第一行文字');
+      expect(inspect.text).toContain('em单位紧凑行高第一行文字');
+      expect(inspect.text).toContain('固定宽度配合margin自动居中容器');
+      expect(inspect.text).toContain('跨屏居中状态不一致的偏移定宽容器');
+      expect(inspect.text).toContain('跨屏宽度与比例差异过大的定宽容器');
+      expect(inspect.text).toContain('这段文字设置了超大左边距与负右边距会导致手机端水平溢出');
       expect(inspect.text).toContain('这段文字由于父容器高度为0在移动端会完全消失');
       expect(inspect.text).toContain('这段内容高度远超父容器固定高度20px且无滚动条导致截断');
       expect(inspect.text).toContain('这是一段直接手写的超长pre标签内容');
-      // 2. text-align: start/end 被归一化为跨端兼容的 left/right，且合规百分比/<375px宽度、overflow:auto简写高度与 data-ignore-width 豁免宽度均保留
+      expect(inspect.imgs.length).toBe(2);
+      expect(inspect.imgs.map((i) => i.alt)).toEqual(['透明违禁图', '浮点零透明图']);
+      for (const imgInfo of inspect.imgs) {
+        expect(imgInfo.opacity).not.toBe('0');
+        expect(imgInfo.opacity).not.toBe('0.0');
+        const decoded = await decodeBitmapDataUrl(page, imgInfo.src);
+        expect(decoded).toEqual({ decoded: true, width: 300, height: 200 });
+      }
+      // 2. caret-color: transparent 与 rgba(0,0,0,0) 被净化，text-align: start/end 被归一化为 left/right
+      expect(inspect.badBoxCaret).not.toMatch(/transparent|rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/i);
+      expect(inspect.badCaretTransparentVal).not.toMatch(/transparent|rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/i);
       expect(inspect.badBoxAlign).toBe('left');
       expect(inspect.badMarginAlign).toBe('right');
+      // 3. 合规百分比/<375px宽度、overflow:auto / overflow-y:scroll 可滚动容器定高与 data-ignore-width 豁免宽度均保留
       expect(inspect.ignoredWidth).toBe('520px');
       expect(inspect.goodScrollableHeight).toBe('60px');
+      expect(inspect.goodScrollYHeight).toBe('70px');
       expect(inspect.goodPctWidth).toBe('80%');
       expect(inspect.goodSmallPxWidth).toBe('240px');
-      // 3. 100% 通过官方多屏沙箱与 Range API 行高重叠校验（以官方 Verifier 为唯一合规判准，不锁死内部属性删除方式）
+      // 4. SVG animate / animateTransform / animateMotion 的 touchstart 均补齐 click
+      expect(inspect.animBegins.length).toBe(3);
+      for (const beginVal of inspect.animBegins) {
+        expect(beginVal).toMatch(/\btouchstart\b/i);
+        expect(beginVal).toMatch(/\bclick\b/i);
+      }
+      // 5. 100% 通过官方多屏沙箱与 Range API 行高重叠校验
       expect(verifyResult).toEqual({ isValid: true, inValidInfo: {} });
     } finally {
       assetStore.clear();
@@ -350,25 +466,64 @@ describe('TestWeChatPipeline', () => {
   });
 
   // =========================================================================
-  // 维度 4：官方文章结构规范净化（#2.1 15层嵌套、#2.2 span[leaf]、#2.3 section[nodeleaf]）
+  // 维度 4：官方文章结构规范净化（#2.1 15层嵌套、#2.2 span[leaf]、#2.3 section[nodeleaf]、#2.4 冗余空白节点）
   // =========================================================================
-  it('test_excessive_nesting_and_illegal_leaf_containers_normalize_cleanly', async () => {
+  it('test_excessive_nesting_illegal_leaf_containers_and_redundant_empty_nodes_normalize_cleanly', async () => {
     const assetStore = new AssetStore();
     const deepOpen = '<section>'.repeat(18);
     const deepClose = '</section>'.repeat(18);
     const rawDeepNesting = `${deepOpen}<span>深层嵌套中的核心正文</span>${deepClose}`;
 
-    // 【前置校验】：先确认 18 层冗余 <section> 嵌套在官方校验器中确实触发 nestNodes 违规
+    // 构造 #2.4 redundant-node 原始违规结构：单容器内子节点数 24 (> 20) 且空白子节点数 18 (> 15)
+    const redundantChildren: string[] = [];
+    for (let i = 1; i <= 6; i++) {
+      redundantChildren.push(`<p>有效保留段落 ${i}</p>`);
+    }
+    for (let i = 1; i <= 9; i++) {
+      redundantChildren.push('<p></p>');
+      redundantChildren.push('<span></span>');
+    }
+    const rawRedundantContainer = `<section class="redundant-wrap">${redundantChildren.join('')}</section>`;
+
+    // 【前置校验】：
+    // 1) 18 层冗余 <section> 嵌套在官方校验器中触发 nestNodes 违规
     const preCheck = await verifier.verifyHtml(rawDeepNesting);
     expect(preCheck.isValid).toBe(false);
     expect(preCheck.inValidInfo.nestNodes?.items.length).toBeGreaterThan(0);
 
+    // 2) 原始 span[leaf]、section[nodeleaf] 与 redundant-node 容器确实命中官方规则 #2.2 ~ #2.4 的违规条件
+    const rawStructureViolations = await page.evaluate((html) => {
+      const container = document.createElement('div');
+      container.innerHTML = html;
+      const redundantWrap = container.querySelector('.redundant-wrap');
+      const allChildren = redundantWrap ? Array.from(redundantWrap.children) : [];
+      const emptyChildren = allChildren.filter(
+        (el) => (el.textContent || '').trim() === '' && el.children.length === 0
+      );
+      return {
+        hasIllegalSpanLeaf: container.querySelectorAll('span[leaf] section, span[leaf] p').length > 0,
+        hasIllegalNodeLeaf: container.querySelectorAll('section[nodeleaf] p, section[nodeleaf] div').length > 0,
+        totalChildrenCount: allChildren.length,
+        emptyChildrenCount: emptyChildren.length,
+      };
+    }, [
+      '<div><span leaf=""><section>不能放在 span[leaf] 里的块级内容</section></span></div>',
+      '<section nodeleaf=""><p>不能放在 section[nodeleaf] 里的块级段落</p></section>',
+      rawRedundantContainer,
+    ].join('\n'));
+    expect(rawStructureViolations.hasIllegalSpanLeaf).toBe(true);
+    expect(rawStructureViolations.hasIllegalNodeLeaf).toBe(true);
+    expect(rawStructureViolations.totalChildrenCount).toBeGreaterThan(20);
+    expect(rawStructureViolations.emptyChildrenCount).toBeGreaterThan(15);
+
     const markdown = [
       rawDeepNesting,
       '',
-      '<div><span leaf=""><section>不能放在 span[leaf] 里的块级内容</section></span></div>',
+      '<div><span leaf="">前缀行内文字<section>不能放在 span[leaf] 里的块级内容</section></span></div>',
       '',
       '<section nodeleaf=""><p>不能放在 section[nodeleaf] 里的块级段落</p></section>',
+      '',
+      rawRedundantContainer,
     ].join('\n');
 
     const snapshot = await buildDeliverySnapshot(markdown, 'wechat', assetStore);
@@ -378,28 +533,109 @@ describe('TestWeChatPipeline', () => {
       const inspect = await page.evaluate((html) => {
         const container = document.createElement('div');
         container.innerHTML = html;
+        const redundantWrap = container.querySelector('.redundant-wrap') || container;
+        const wrapChildren = Array.from(redundantWrap.children);
+        const emptyWrapChildren = wrapChildren.filter(
+          (el) =>
+            (el.textContent || '').trim() === '' &&
+            !el.querySelector('img, svg, hr, br, video, audio, iframe')
+        );
+        const emptySpanLeafCount = Array.from(container.querySelectorAll('span[leaf]')).filter(
+          (el) => (el.textContent || '').trim() === '' && !el.querySelector('img, br, svg')
+        ).length;
         return {
           text: container.textContent || '',
-          illegalLeafCount: container.querySelectorAll('span[leaf] section, section[nodeleaf] p').length,
+          illegalLeafCount: container.querySelectorAll(
+            'span[leaf] section, span[leaf] p, span[leaf] div, section[nodeleaf] p, section[nodeleaf] div'
+          ).length,
+          emptySpanLeafCount,
+          hasNestLevelAttr: container.querySelector('[data-nest-level]') !== null,
+          emptyWrapChildrenCount: emptyWrapChildren.length,
         };
       }, snapshot.html);
 
       expect(snapshot.ready).toBe(true);
-      // 1. 文字内容完整保留
+      // 1. 文字内容完整保留（含 6 个有效段落）
       expect(inspect.text).toContain('深层嵌套中的核心正文');
+      expect(inspect.text).toContain('前缀行内文字');
       expect(inspect.text).toContain('不能放在 span[leaf] 里的块级内容');
       expect(inspect.text).toContain('不能放在 section[nodeleaf] 里的块级段落');
-      // 2. 通过官方校验器（消除 #2.1 nestNodes 冗余 15 层嵌套违规）
+      for (let i = 1; i <= 6; i++) {
+        expect(inspect.text).toContain(`有效保留段落 ${i}`);
+      }
+      // 2. 通过官方校验器（消除 #2.1 nestNodes 冗余 15 层嵌套违规，且不残留 data-nest-level 临时属性）
       expect(verifyResult).toEqual({ isValid: true, inValidInfo: {} });
-      // 3. 消除 #2.2 span[leaf] 与 #2.3 section[nodeleaf] 非法包裹块级元素结构（官方仓库未在 collect.ts 接线此两项，通过 DOM 契约验证）
+      expect(inspect.hasNestLevelAttr).toBe(false);
+      expect(snapshot.html).not.toContain('data-nest-level');
+      // 3. 消除 #2.2 span[leaf] 与 #2.3 section[nodeleaf] 非法包裹块级元素结构及拆分产生的空 span[leaf]
       expect(inspect.illegalLeafCount).toBe(0);
+      expect(inspect.emptySpanLeafCount).toBe(0);
+      // 4. 消除 #2.4 redundant-node 大量空白子节点堆积（剩余空节点数 <= 15）
+      expect(inspect.emptyWrapChildrenCount).toBeLessThanOrEqual(15);
     } finally {
       assetStore.clear();
     }
   });
 
   // =========================================================================
-  // 维度 5：官方 Dark Mode 深色模式合规净化（#4.1.1 低对比度、#4.1.2 文字渐变背景、#4.5.1 data-no-dark、#4.6 data-ignore-dm）
+  // 维度 5：官方字体使用规范净化（#3 font-family 非白名单自定义字体收敛）
+  // =========================================================================
+  it('test_custom_font_family_normalizes_to_wechat_compatible_font_stack', async () => {
+    const rawCustomFontHtml = [
+      '<p class="inline-fancy-font" style="font-family: &quot;Custom Fancy Font&quot;, cursive;">内联花哨自定义字体段落</p>',
+      '<div class="css-fancy-font" style="font-family: Papyrus, fantasy;">样式表花哨自定义字体段落</div>',
+    ].join('\n');
+
+    // 【前置校验】：先确认原始非微信白名单字体确实触发官方 #3 checkFontFamilyViolation 规则
+    const preCheckFontViolations = await collectFontFamilyViolations(page, rawCustomFontHtml);
+    expect(preCheckFontViolations.length).toBe(2);
+    expect(preCheckFontViolations[0].property).toBe('font-family');
+    expect(preCheckFontViolations[0].rule).toBe(propertyRules['font-family']);
+
+    const assetStore = new AssetStore();
+    const markdown = [
+      '<p class="inline-fancy-font" style="font-family: &quot;Custom Fancy Font&quot;, cursive;">内联花哨自定义字体段落</p>',
+      '',
+      '<div class="css-fancy-font">样式表花哨自定义字体段落</div>',
+      '',
+      '普通 Markdown 段落继承字体测试。',
+    ].join('\n');
+
+    const snapshot = await buildDeliverySnapshot(markdown, 'wechat', assetStore, {
+      tokens: {
+        '--morph-font-sans': '"Comic Sans MS", cursive',
+      },
+      customCss: `
+        .css-fancy-font {
+          font-family: "Papyrus", fantasy;
+        }
+      `,
+    });
+
+    try {
+      const verifyResult = await verifier.verifyHtml(snapshot.html);
+      const postCheckFontViolations = await collectFontFamilyViolations(page, snapshot.html);
+      const renderedText = await page.evaluate((html) => {
+        const container = document.createElement('div');
+        container.innerHTML = html;
+        return container.textContent || '';
+      }, snapshot.html);
+
+      expect(snapshot.ready).toBe(true);
+      // 1. 原稿正文一字不差
+      expect(renderedText).toContain('内联花哨自定义字体段落');
+      expect(renderedText).toContain('样式表花哨自定义字体段落');
+      expect(renderedText).toContain('普通 Markdown 段落继承字体测试。');
+      // 2. 转化后不触发 checkFontFamilyViolation 规则且通过官方校验器
+      expect(postCheckFontViolations).toEqual([]);
+      expect(verifyResult).toEqual({ isValid: true, inValidInfo: {} });
+    } finally {
+      assetStore.clear();
+    }
+  });
+
+  // =========================================================================
+  // 维度 6：官方 Dark Mode 深色模式合规净化（#4.1.1 低对比度、#4.1.2 文字渐变背景、#4.5.1 data-no-dark、#4.6 data-ignore-dm）
   // =========================================================================
   it('test_dark_mode_low_contrast_and_text_gradient_sanitize_while_respecting_ignore_dm', async () => {
     const rawLowContrast =
@@ -445,16 +681,18 @@ describe('TestWeChatPipeline', () => {
           exemptStyle: exemptEl?.getAttribute('style') || '',
           lowContrastHasIgnoreDm: lowContrastEl?.hasAttribute('data-ignore-dm') || false,
           gradientHasIgnoreDm: gradientEl?.hasAttribute('data-ignore-dm') || false,
+          hasDataNoDark: container.querySelector('[data-no-dark]') !== null,
         };
       }, snapshot.html);
 
       expect(snapshot.ready).toBe(true);
-      // 1. 正文内容完整保留，且未通过注入伪造的 data-ignore-dm 属性逃避校验
+      // 1. 正文内容完整保留，且未通过注入伪造的 data-ignore-dm 属性逃避校验，data-no-dark 白名单属性已剥离
       expect(inspect.text).toContain('文本与背景对比度过低');
       expect(inspect.text).toContain('文字背景使用了线性渐变');
       expect(inspect.text).toContain('带有白名单属性的列表项');
       expect(inspect.lowContrastHasIgnoreDm).toBe(false);
       expect(inspect.gradientHasIgnoreDm).toBe(false);
+      expect(inspect.hasDataNoDark).toBe(false);
       // 2. 显式标记 data-ignore-dm 的节点、以及 #4.1.3 无文字纯背景节点，保留其渐变背景
       expect(inspect.exemptStyle).toContain('linear-gradient');
       expect(inspect.pureBgStyle).toContain('linear-gradient');
