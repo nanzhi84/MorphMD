@@ -654,10 +654,54 @@ export function normalizeXArticleStructureAndStyles(
   }
 
   // 7. #4.1 Entity conflict: decompose nested <a> and <a> wrapping <img>
-  const nestedAnchors = Array.from(rootContainer.querySelectorAll('a a'));
-  for (const innerA of nestedAnchors) {
-    if (!rootContainer.contains(innerA)) continue;
-    unwrapElement(innerA);
+  const outerAnchorsWithNested = Array.from(rootContainer.querySelectorAll('a')).filter(
+    (a) => !a.parentElement?.closest('a') && Boolean(a.querySelector('a'))
+  );
+  for (const outerA of outerAnchorsWithNested) {
+    if (!rootContainer.contains(outerA) || !outerA.parentNode) continue;
+    const parent = outerA.parentNode;
+    const outerHref = outerA.getAttribute('href') || '';
+    const segments: HTMLAnchorElement[] = [];
+    let currentAnchor: HTMLAnchorElement | null = null;
+    let currentHref = '';
+
+    const ensureAnchor = (href: string): HTMLAnchorElement => {
+      if (!currentAnchor || currentHref !== href) {
+        currentAnchor = doc.createElement('a');
+        if (href) currentAnchor.setAttribute('href', href);
+        currentHref = href;
+        segments.push(currentAnchor);
+      }
+      return currentAnchor;
+    };
+
+    const walkNested = (node: Node, href: string) => {
+      if (node.nodeType === 1) {
+        const el = node as Element;
+        if (el.tagName.toLowerCase() === 'a') {
+          const innerHref = el.getAttribute('href') || href;
+          currentAnchor = null;
+          Array.from(el.childNodes).forEach((child) => walkNested(child, innerHref));
+          currentAnchor = null;
+          return;
+        }
+        if (el.querySelector('a')) {
+          Array.from(el.childNodes).forEach((child) => walkNested(child, href));
+          return;
+        }
+      }
+      if (node.nodeType === 3 && (node.textContent || '').length === 0) return;
+      ensureAnchor(href).appendChild(node.cloneNode(true));
+    };
+
+    Array.from(outerA.childNodes).forEach((child) => walkNested(child, outerHref));
+
+    for (const seg of segments) {
+      const hasContent = (seg.textContent || '').trim().length > 0 || Boolean(seg.querySelector('img'));
+      if (!hasContent) continue;
+      parent.insertBefore(seg, outerA);
+    }
+    parent.removeChild(outerA);
   }
 
   const anchorsWithImg = Array.from(rootContainer.querySelectorAll('a')).filter((a) => Boolean(a.querySelector('img')));
@@ -692,15 +736,27 @@ export function normalizeXArticleStructureAndStyles(
 
     Array.from(a.childNodes).forEach(flushNode);
 
+    let emittedTextAnchor = false;
+    let firstImgAlt = '';
     for (const frag of fragments) {
-      if (
-        frag.nodeType === 1 &&
-        (frag as Element).tagName.toLowerCase() === 'a' &&
-        ((frag.textContent || '').trim().length === 0)
-      ) {
-        continue;
+      if (frag.nodeType === 1) {
+        const fragTag = (frag as Element).tagName.toLowerCase();
+        if (fragTag === 'a') {
+          if ((frag.textContent || '').trim().length === 0) {
+            continue;
+          }
+          emittedTextAnchor = true;
+        } else if (fragTag === 'img' && !firstImgAlt) {
+          firstImgAlt = (frag as Element).getAttribute('alt') || '';
+        }
       }
       parent.insertBefore(frag, a);
+    }
+    if (!emittedTextAnchor && href) {
+      const companionAnchor = doc.createElement('a');
+      companionAnchor.setAttribute('href', href);
+      companionAnchor.textContent = firstImgAlt.trim() || href;
+      parent.insertBefore(companionAnchor, a);
     }
     parent.removeChild(a);
     diagnostics.push({

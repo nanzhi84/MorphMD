@@ -1,10 +1,10 @@
-import { deflateSync } from 'node:zlib';
 import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   AssetStore,
   buildDeliverySnapshot,
 } from '../src/index';
+import { decodeBitmapDataUrl, png } from './support/fixtures';
 import {
   createWeChatVerificationSession,
   propertyRules,
@@ -20,69 +20,6 @@ import {
   type RuleCandidate,
   type RuleContext,
 } from './verifiers/wechat/verify-engine/rules/index';
-
-/**
- * 构造真实可解码的 PNG 二进制数据
- */
-function createRealPngBytes(width = 800, height = 400): Uint8Array {
-  function chunk(type: string, data: Buffer): Buffer {
-    const payload = Buffer.concat([Buffer.from(type), data]);
-    let crc = 0xffffffff;
-    for (const byte of payload) {
-      crc ^= byte;
-      for (let i = 0; i < 8; i++) {
-        crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-      }
-    }
-    const size = Buffer.alloc(4);
-    size.writeUInt32BE(data.length);
-    const checksum = Buffer.alloc(4);
-    checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
-    return Buffer.concat([size, payload, checksum]);
-  }
-
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(width, 0);
-  header.writeUInt32BE(height, 4);
-  header[8] = 8;
-  header[9] = 2;
-
-  const rows = Buffer.alloc((width * 3 + 1) * height);
-  return new Uint8Array(
-    Buffer.concat([
-      Buffer.from('89504e470d0a1a0a', 'hex'),
-      chunk('IHDR', header),
-      chunk('IDAT', deflateSync(rows)),
-      chunk('IEND', Buffer.alloc(0)),
-    ])
-  );
-}
-
-/**
- * 在真实 Chromium 浏览器中解码位图 Data URL 并返回天然像素尺寸
- */
-async function decodeBitmapDataUrl(
-  page: Page,
-  src: string
-): Promise<{ decoded: boolean; width: number; height: number }> {
-  if (!/^data:image\/(png|webp);base64,[A-Za-z0-9+/=]+$/i.test(src)) {
-    return { decoded: false, width: 0, height: 0 };
-  }
-  return await page.evaluate(async (dataUrl) => {
-    const img = new Image();
-    img.src = dataUrl;
-    try {
-      await img.decode();
-      return {
-        decoded: img.naturalWidth > 0 && img.naturalHeight > 0,
-        width: img.naturalWidth,
-        height: img.naturalHeight,
-      };
-    } catch {
-      return { decoded: false, width: 0, height: 0 };
-    }
-  }, src);
-}
 
 /**
  * 使用官方 #3 font-family 规则检查器扫描 HTML 片段中的非白名单字体违规
@@ -225,7 +162,7 @@ describe('TestWeChatPipeline', () => {
   // =========================================================================
   it('test_local_image_injects_wechat_dimensions_and_passes_official_verifier', async () => {
     const assetStore = new AssetStore();
-    const pngBytes = createRealPngBytes(800, 400);
+    const pngBytes = png(1, 800, 400);
     const record = await assetStore.ingest(pngBytes, { fileName: 'banner.png' });
 
     const markdown = `![公众号横幅图](morph-asset://${record.id})`;
@@ -268,7 +205,7 @@ describe('TestWeChatPipeline', () => {
   // =========================================================================
   it('test_violating_css_properties_are_sanitized_to_pass_official_verifier', async () => {
     const assetStore = new AssetStore();
-    const pngBytes = createRealPngBytes(300, 200);
+    const pngBytes = png(1, 300, 200);
     const record = await assetStore.ingest(pngBytes, { fileName: 'pic.png' });
 
     // 【前置校验】：先确认构造的原始违规片段在官方校验器中确实触发 #1.1 ~ #1.8 全部规则报警
@@ -533,8 +470,8 @@ describe('TestWeChatPipeline', () => {
       const inspect = await page.evaluate((html) => {
         const container = document.createElement('div');
         container.innerHTML = html;
-        const redundantWrap = container.querySelector('.redundant-wrap') || container;
-        const wrapChildren = Array.from(redundantWrap.children);
+        const redundantWrap = container.querySelector('.redundant-wrap');
+        const wrapChildren = redundantWrap ? Array.from(redundantWrap.children) : [];
         const emptyWrapChildren = wrapChildren.filter(
           (el) =>
             (el.textContent || '').trim() === '' &&
@@ -545,6 +482,7 @@ describe('TestWeChatPipeline', () => {
         ).length;
         return {
           text: container.textContent || '',
+          hasRedundantWrap: redundantWrap !== null,
           illegalLeafCount: container.querySelectorAll(
             'span[leaf] section, span[leaf] p, span[leaf] div, section[nodeleaf] p, section[nodeleaf] div'
           ).length,
@@ -570,7 +508,8 @@ describe('TestWeChatPipeline', () => {
       // 3. 消除 #2.2 span[leaf] 与 #2.3 section[nodeleaf] 非法包裹块级元素结构及拆分产生的空 span[leaf]
       expect(inspect.illegalLeafCount).toBe(0);
       expect(inspect.emptySpanLeafCount).toBe(0);
-      // 4. 消除 #2.4 redundant-node 大量空白子节点堆积（剩余空节点数 <= 15）
+      // 4. 消除 #2.4 redundant-node 大量空白子节点堆积（.redundant-wrap 存在且剩余空节点数 <= 15）
+      expect(inspect.hasRedundantWrap).toBe(true);
       expect(inspect.emptyWrapChildrenCount).toBeLessThanOrEqual(15);
     } finally {
       assetStore.clear();
@@ -681,6 +620,7 @@ describe('TestWeChatPipeline', () => {
           exemptStyle: exemptEl?.getAttribute('style') || '',
           lowContrastHasIgnoreDm: lowContrastEl?.hasAttribute('data-ignore-dm') || false,
           gradientHasIgnoreDm: gradientEl?.hasAttribute('data-ignore-dm') || false,
+          ignoreDmCount: container.querySelectorAll('[data-ignore-dm]').length,
           hasDataNoDark: container.querySelector('[data-no-dark]') !== null,
         };
       }, snapshot.html);
@@ -692,6 +632,7 @@ describe('TestWeChatPipeline', () => {
       expect(inspect.text).toContain('带有白名单属性的列表项');
       expect(inspect.lowContrastHasIgnoreDm).toBe(false);
       expect(inspect.gradientHasIgnoreDm).toBe(false);
+      expect(inspect.ignoreDmCount).toBe(1);
       expect(inspect.hasDataNoDark).toBe(false);
       // 2. 显式标记 data-ignore-dm 的节点、以及 #4.1.3 无文字纯背景节点，保留其渐变背景
       expect(inspect.exemptStyle).toContain('linear-gradient');

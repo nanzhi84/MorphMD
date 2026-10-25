@@ -1,85 +1,16 @@
-import { deflateSync } from 'node:zlib';
 import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   AssetStore,
   buildDeliverySnapshot,
 } from '../src/index';
+import { decodeBitmapDataUrl, png } from './support/fixtures';
 import {
   createXArticleVerificationSession,
   inspectRasterDataUrl,
   verifyXArticleHtml,
   type XArticleVerificationSession,
 } from './verifiers/x-article/index';
-
-/**
- * 构造真实可解码的最小 PNG 二进制数据（含合法 IHDR / IDAT / IEND 与 CRC 校验）
- */
-function createRealPngBytes(width = 4, height = 3): Uint8Array {
-  function chunk(type: string, data: Buffer): Buffer {
-    const payload = Buffer.concat([Buffer.from(type), data]);
-    let crc = 0xffffffff;
-    for (const byte of payload) {
-      crc ^= byte;
-      for (let i = 0; i < 8; i++) {
-        crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-      }
-    }
-    const size = Buffer.alloc(4);
-    size.writeUInt32BE(data.length);
-    const checksum = Buffer.alloc(4);
-    checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
-    return Buffer.concat([size, payload, checksum]);
-  }
-
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(width, 0);
-  header.writeUInt32BE(height, 4);
-  header[8] = 8; // bit depth
-  header[9] = 2; // color type RGB
-
-  const rows = Buffer.alloc((width * 3 + 1) * height);
-  for (let y = 0; y < height; y++) {
-    for (let x = 1; x <= width * 3; x++) {
-      rows[y * (width * 3 + 1) + x] = (x * 17 + y * 31) % 256;
-    }
-  }
-
-  return new Uint8Array(
-    Buffer.concat([
-      Buffer.from('89504e470d0a1a0a', 'hex'),
-      chunk('IHDR', header),
-      chunk('IDAT', deflateSync(rows)),
-      chunk('IEND', Buffer.alloc(0)),
-    ])
-  );
-}
-
-/**
- * 在真实 Chromium 浏览器中解码 PNG/WebP Data URL 并返回天然像素尺寸
- */
-async function decodeBitmapDataUrl(
-  page: Page,
-  src: string
-): Promise<{ decoded: boolean; width: number; height: number }> {
-  if (!/^data:image\/(png|webp);base64,[A-Za-z0-9+/=]+$/i.test(src)) {
-    return { decoded: false, width: 0, height: 0 };
-  }
-  return await page.evaluate(async (dataUrl) => {
-    const img = new Image();
-    img.src = dataUrl;
-    try {
-      await img.decode();
-      return {
-        decoded: img.naturalWidth > 0 && img.naturalHeight > 0,
-        width: img.naturalWidth,
-        height: img.naturalHeight,
-      };
-    } catch {
-      return { decoded: false, width: 0, height: 0 };
-    }
-  }, src);
-}
 
 describe('TestXArticlePipeline', () => {
   let browser: Browser;
@@ -106,7 +37,7 @@ describe('TestXArticlePipeline', () => {
   // =========================================================================
   it('test_local_image_without_remote_host_resolves_to_ready_image_node', async () => {
     const assetStore = new AssetStore();
-    const pngBytes = createRealPngBytes(12, 8);
+    const pngBytes = png(1, 12, 8);
     const record = await assetStore.ingest(pngBytes, { fileName: 'local-arch.png' });
 
     // 【前置校验】：未解析的 morph-asset:// 图片在 X Verifier 中必须触发 unsafe-media-or-link 违规
@@ -506,7 +437,7 @@ describe('TestXArticlePipeline', () => {
   // =========================================================================
   it('test_unsupported_elements_and_deep_list_nesting_normalize_without_text_loss', async () => {
     const assetStore = new AssetStore();
-    const pngBytes = createRealPngBytes(10, 10);
+    const pngBytes = png(1, 10, 10);
     const record = await assetStore.ingest(pngBytes, { fileName: 'in-heading.png' });
 
     // 【前置校验】：验证 #1.4 所有非法容器/嵌套形态与 #1.5 超深列表在 X Verifier 中均精确报错
@@ -581,6 +512,7 @@ describe('TestXArticlePipeline', () => {
       expect(listBlocks.every((b) => b.depth <= 4)).toBe(true);
       expect(Math.max(...listBlocks.map((b) => b.depth))).toBe(4);
       // 3. 原稿所有正文、深层列表项与图片替代文本一字不差
+      expect(Object.values(entityMap).filter((e) => e.type === 'IMAGE').length).toBe(2);
       const expectedTexts = [
         '七层语义容器内的正文',
         '孤立列表项文本',
@@ -592,8 +524,10 @@ describe('TestXArticlePipeline', () => {
         '列表项内三级标题',
         '标题前导文本',
         '标题内嵌套块元素',
+        '标题内嵌套图片',
         '代码块前导文本',
         '代码块内嵌套div',
+        '代码块内图片',
         '外层引用段落',
         '内层嵌套引用段落',
         '嵌套morph-doc容器内的段落',
@@ -618,7 +552,7 @@ describe('TestXArticlePipeline', () => {
   // =========================================================================
   it('test_unsafe_media_protocols_and_dangerous_links_sanitize_cleanly', async () => {
     const assetStore = new AssetStore();
-    const pngBytes = createRealPngBytes(8, 6);
+    const pngBytes = png(1, 8, 6);
     const record = await assetStore.ingest(pngBytes, { fileName: 'safe.png' });
 
     // 【前置校验】：危险链接（javascript:/vbscript:/data:text/html）、内联事件（onclick/onerror）、srcset、非加密 http:// 图片及 data:image/svg+xml 图片均触发 unsafe-media-or-link
@@ -694,7 +628,7 @@ describe('TestXArticlePipeline', () => {
   // =========================================================================
   it('test_nested_links_and_linked_images_decompose_without_entity_conflict', async () => {
     const assetStore = new AssetStore();
-    const pngBytes = createRealPngBytes(16, 12);
+    const pngBytes = png(1, 16, 12);
     const record = await assetStore.ingest(pngBytes, { fileName: 'linked.png' });
 
     // 【前置校验】：<a> 内包裹 <img> 以及嵌套 <a>...<a>...</a></a> 在 X Verifier 中均触发 entity-conflict
@@ -724,19 +658,30 @@ describe('TestXArticlePipeline', () => {
       const verifyResult = await xSession.verifyHtml(snapshot.html);
       const { blocks, entityMap } = verifyResult.draftState;
       const imageEntities = Object.values(entityMap).filter((e) => e.type === 'IMAGE');
+      const linkUrls = Object.values(entityMap)
+        .filter((e) => e.type === 'LINK')
+        .map((e) => String(e.data.url || ''));
       const allBlockText = blocks.map((b) => b.text).join('\n');
 
       expect(snapshot.ready).toBe(true);
       // 1. 100% 通过 X Verifier（无 entity-conflict 重叠实体冲突）
       expect(verifyResult.isValid).toBe(true);
       expect(verifyResult.inValidInfo).toEqual({});
-      // 2. 两张图片与所有链接文字均完整保留，且图片在真实 Chromium 中可解码
+      // 2. 两张图片与所有链接文字、目标 URL 均完整保留，且图片在真实 Chromium 中可解码
       expect(imageEntities.length).toBe(2);
       expect(imageEntities.map((e) => e.data.alt)).toEqual(['可点击架构图', '混排链接内图片']);
       for (const ent of imageEntities) {
         const decoded = await decodeBitmapDataUrl(page, String(ent.data.src || ''));
         expect(decoded).toEqual({ decoded: true, width: 16, height: 12 });
       }
+      expect(linkUrls).toEqual(
+        expect.arrayContaining([
+          'https://example.com/arch',
+          'https://example.com/mixed',
+          'https://example.com/outer',
+          'https://example.com/inner',
+        ]),
+      );
       expect(allBlockText).toContain('前导链接文字');
       expect(allBlockText).toContain('后续链接文字');
       expect(allBlockText).toContain('外层链接文本');
@@ -751,7 +696,7 @@ describe('TestXArticlePipeline', () => {
   // =========================================================================
   it('test_mixed_inline_media_and_empty_blocks_preserve_content_without_collapse', async () => {
     const assetStore = new AssetStore();
-    const pngBytes = createRealPngBytes(14, 10);
+    const pngBytes = png(1, 14, 10);
     const record = await assetStore.ingest(pngBytes, { fileName: 'inline.png' });
 
     // 【前置校验】：含空白块 <p></p> / <div></div> / <blockquote></blockquote> 的原始 HTML 在 X Verifier 中触发 content-loss
