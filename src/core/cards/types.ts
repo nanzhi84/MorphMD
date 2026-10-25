@@ -88,3 +88,74 @@ export interface CardsPaginationResult {
   readonly state: CardPaginationState;
   readonly diagnostics: readonly DiagnosticItem[];
 }
+
+export interface CardPagePngArtifact {
+  readonly pageNumber: number;
+  readonly totalPages: number;
+  readonly fileName: string;
+  readonly ratio: CardAspectRatio;
+  readonly layoutWidth: number;
+  readonly layoutHeight: number;
+  readonly width: number;
+  readonly height: number;
+  readonly exportScale: number;
+  readonly mimeType: 'image/png';
+  readonly data: Uint8Array;
+  readonly dataUrl: string;
+  readonly crc32: number;
+}
+
+export interface CardsExportOptions {
+  ratio?: CardAspectRatio;
+  filePrefix?: string;
+  scaleOverride?: number;
+  hostDevicePixelRatio?: number;
+  pageNumbers?: readonly number[];
+  includeManifest?: boolean;
+  headerText?: string;
+  tokens?: Record<string, string>;
+  customCss?: string;
+  paginationOptions?: CardsPaginationOptions;
+}
+
+export interface CardsRasterizeResult {
+  readonly pages: readonly CardPagePngArtifact[];
+  readonly diagnostics: readonly DiagnosticItem[];
+}
+
+export interface ZipEntryRecord {
+  readonly path: string;
+  readonly data: Uint8Array;
+  readonly crc32: number;
+  readonly compressionMethod: 0 | 8;
+  readonly compressedSize: number;
+  readonly uncompressedSize: number;
+}
+
+export interface CardsExportManifest {
+  readonly ratio: CardAspectRatio;
+  readonly totalPages: number;
+  readonly exportedPages: number;
+  readonly exportWidth: number;
+  readonly exportHeight: number;
+  readonly layoutWidth: number;
+  readonly layoutHeight: number;
+  readonly exportScale: number;
+  readonly pages: ReadonlyArray<{
+    readonly pageNumber: number;
+    readonly fileName: string;
+    readonly width: number;
+    readonly height: number;
+    readonly byteLength: number;
+    readonly crc32: number;
+  }>;
+}
+
+export interface CardsZipExportResult {
+  readonly zipFileName: string;
+  readonly mimeType: 'application/zip';
+  readonly zipData: Uint8Array;
+  readonly pages: readonly CardPagePngArtifact[];
+  readonly manifest: CardsExportManifest;
+  readonly diagnostics: readonly DiagnosticItem[];
+}
