@@ -30,6 +30,7 @@ export class AssetStore {
   private accessOrder: string[] = [];
   private inFlightIngests = new Map<string, Promise<AssetRecord>>();
   private inFlightRecords = new Map<string, InternalAssetRecord>();
+  private listeners = new Set<(record: AssetRecord) => void>();
   private generation = 0;
 
   private maxEntries: number;
@@ -81,7 +82,20 @@ export class AssetStore {
     const record = this.records.get(id);
     if (record) {
       record.refCount++;
+      if (!record.blobUrl && (record.status === 'preview-ready' || record.status === 'delivery-ready')) {
+        const data = this.binaryData.get(id);
+        if (data) {
+          record.blobUrl = createBlobUrl(data, record.mimeType, id);
+        }
+      }
     }
+  }
+
+  public subscribe(listener: (record: AssetRecord) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   public release(id: string): void {
@@ -440,6 +454,21 @@ export class AssetStore {
   private setStatus(record: InternalAssetRecord, status: AssetStatus): void {
     record.status = status;
     this.recordTransition(record.id, status);
+    if (status === 'delivery-ready' || status === 'failed') {
+      this.notifyListeners(record);
+    }
+  }
+
+  private notifyListeners(record: InternalAssetRecord): void {
+    if (this.listeners.size === 0) return;
+    const view = createReadOnlyRecordView(record);
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(view);
+      } catch {
+        // Ignore listener errors to preserve AssetStore state machine integrity
+      }
+    }
   }
 
   private recordTransition(id: string, status: AssetStatus): void {
