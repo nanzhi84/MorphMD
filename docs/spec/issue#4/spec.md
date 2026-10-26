@@ -88,7 +88,7 @@
 
 ### 3.1 实施与验收 Checklist
 
-- [ ] 由独立子代理（Fresh Subagent）严格依据本 Issue 契约补充黑盒测试（验证点击「复制富文本」按钮向剪贴板写入 `text/html` 与 `text/plain` 双通道数据，且 `extractPlainTextFromDom` 在块级元素间不产生多重异常空行），并在修复前确认红灯失败（TDD Red Phase）。
-- [ ] 修复 [`src/App.tsx`](../../../src/App.tsx) 中 `handlePrimaryDelivery` 的剪贴板写入实现，支持 `ClipboardItem` 双通道（`text/html` + `text/plain`）写入及 `copy` 事件降级兜底。
-- [ ] 修复 [`src/core/selection/normalizer.ts`](../../../src/core/selection/normalizer.ts) 中 `extractPlainTextFromDom` 的块间空白文本节点叠加问题，确保纯文本换行干净且不破坏 `<pre>/<code>`、`<br>` 与局部选区边界空白契约。
-- [ ] 通过全量黑盒测试套件、真实 Chromium 浏览器剪贴板读写端到端验证、`npm run typecheck` 与 `harness doctor` 规范巡检。
+- [x] 由独立子代理（Fresh Subagent）严格依据本 Issue 契约补充黑盒测试（验证点击「复制富文本」按钮向剪贴板写入 `text/html` 与 `text/plain` 双通道数据，且 `extractPlainTextFromDom` 在块级元素间不产生多重异常空行），并在修复前确认红灯失败（TDD Red Phase）。
+- [x] 修复 [`src/App.tsx`](../../../src/App.tsx) 中 `handlePrimaryDelivery` 的剪贴板写入实现，支持 `ClipboardItem` 双通道（`text/html` + `text/plain`）写入及 `copy` 事件降级兜底。
+- [x] 修复 [`src/core/selection/normalizer.ts`](../../../src/core/selection/normalizer.ts) 中 `extractPlainTextFromDom` 的块间空白文本节点叠加问题，确保纯文本换行干净且不破坏 `<pre>/<code>`、`<br>` 与局部选区边界空白契约。
+- [x] 通过全量黑盒测试套件、真实 Chromium 浏览器剪贴板读写端到端验证、`npm run typecheck` 与 `harness doctor` 规范巡检。

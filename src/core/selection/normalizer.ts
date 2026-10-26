@@ -32,11 +32,66 @@ function findMathAtom(node: Node | null): HTMLElement | null {
  */
 export function extractPlainTextFromDom(node: Node): string {
   const BLOCK_SEP = '\0BLOCK_SEP\0';
+  const BLOCK_TAG_RE =
+    /^(div|p|h[1-6]|blockquote|ul|ol|li|tr|pre|table|thead|tbody|tfoot|header|footer|section|figure|figcaption)$/;
+  const STRUCTURAL_SIBLING_RE =
+    /^(div|p|h[1-6]|blockquote|ul|ol|li|tr|td|th|pre|table|thead|tbody|tfoot|header|footer|section|figure|figcaption|hr)$/;
   let text = '';
 
-  function walk(curr: Node) {
+  function isInterBlockFormattingText(
+    textNode: Node,
+    raw: string,
+    inPreOrCode: boolean
+  ): boolean {
+    if (inPreOrCode) return false;
+    if (!/^\s+$/.test(raw)) return false;
+
+    const parentEl = textNode.parentElement;
+    const parentTag = parentEl?.tagName.toLowerCase() || '';
+    if (
+      /^(div|blockquote|ul|ol|table|thead|tbody|tfoot|tr|section|figure)$/.test(
+        parentTag
+      )
+    ) {
+      const prev = textNode.previousSibling;
+      const next = textNode.nextSibling;
+      const prevIsStruct =
+        !prev ||
+        (prev.nodeType === 1 &&
+          STRUCTURAL_SIBLING_RE.test((prev as Element).tagName.toLowerCase()));
+      const nextIsStruct =
+        !next ||
+        (next.nodeType === 1 &&
+          STRUCTURAL_SIBLING_RE.test((next as Element).tagName.toLowerCase()));
+      if (prevIsStruct && nextIsStruct) {
+        return true;
+      }
+    }
+
+    if (/[\r\n]/.test(raw)) {
+      const prev = textNode.previousSibling;
+      const next = textNode.nextSibling;
+      const prevIsBlock =
+        prev?.nodeType === 1 &&
+        STRUCTURAL_SIBLING_RE.test((prev as Element).tagName.toLowerCase());
+      const nextIsBlock =
+        next?.nodeType === 1 &&
+        STRUCTURAL_SIBLING_RE.test((next as Element).tagName.toLowerCase());
+      if (prevIsBlock || nextIsBlock || !prev || !next) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function walk(curr: Node, inPreOrCode = false) {
     if (curr.nodeType === 3) {
-      text += curr.textContent || '';
+      const raw = curr.textContent || '';
+      if (isInterBlockFormattingText(curr, raw, inPreOrCode)) {
+        return;
+      }
+      text += raw;
       return;
     }
 
@@ -62,6 +117,13 @@ export function extractPlainTextFromDom(node: Node): string {
 
       if (tag === 'img') {
         const alt = el.getAttribute('alt');
+        if (el.getAttribute('data-raster-type') === 'table' && alt) {
+          text += alt
+            .split(' ; ')
+            .map((row) => row.split(' | ').join('\t'))
+            .join('\n');
+          return;
+        }
         text += alt ? `[Image: ${alt}]` : '[Image]';
         return;
       }
@@ -73,13 +135,14 @@ export function extractPlainTextFromDom(node: Node): string {
         }
       }
 
-      const isBlock = /^(div|p|h[1-6]|blockquote|li|tr|pre|table|header|footer|section)$/.test(tag);
+      const isBlock = BLOCK_TAG_RE.test(tag);
       if (isBlock && text.length > 0 && !text.endsWith(BLOCK_SEP)) {
         text += BLOCK_SEP;
       }
 
+      const nextInPreOrCode = inPreOrCode || tag === 'pre' || tag === 'code';
       for (let child = el.firstChild; child; child = child.nextSibling) {
-        walk(child);
+        walk(child, nextInPreOrCode);
       }
 
       if (isBlock && text.length > 0 && !text.endsWith(BLOCK_SEP)) {
@@ -88,7 +151,7 @@ export function extractPlainTextFromDom(node: Node): string {
     }
   }
 
-  walk(node);
+  walk(node, false);
   return text
     .replace(/^(?:\0BLOCK_SEP\0)+/, '')
     .replace(/(?:\0BLOCK_SEP\0)+$/, '')

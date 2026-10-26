@@ -1058,12 +1058,105 @@ export const App: React.FC<AppProps> = ({
     const payload = serializeFullSnapshot(latestSnap, store);
     onCopyPayload?.(payload);
 
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(payload.plainText);
+    let copied = false;
+    const ClipboardItemCtor =
+      (typeof window !== 'undefined' && (window as unknown as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem) ||
+      (typeof globalThis !== 'undefined' && (globalThis as unknown as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem);
+
+    if (
+      typeof navigator !== 'undefined' &&
+      typeof navigator.clipboard?.write === 'function' &&
+      typeof ClipboardItemCtor === 'function'
+    ) {
+      try {
+        const item = new ClipboardItemCtor({
+          'text/html': new Blob([payload.html], { type: 'text/html' }),
+          'text/plain': new Blob([payload.plainText], { type: 'text/plain' }),
+        });
+        await navigator.clipboard.write([item]);
+        copied = true;
+      } catch {
+        copied = false;
       }
-    } catch {
-      // Clipboard API permission fallback in non-secure/headless context
+    }
+
+    if (
+      !copied &&
+      typeof document !== 'undefined' &&
+      typeof document.execCommand === 'function' &&
+      document.body
+    ) {
+      const sel = typeof window !== 'undefined' && typeof window.getSelection === 'function'
+        ? window.getSelection()
+        : null;
+      const savedRanges: Range[] = [];
+      if (sel) {
+        for (let i = 0; i < sel.rangeCount; i++) {
+          savedRanges.push(sel.getRangeAt(i).cloneRange());
+        }
+      }
+
+      const tempEl = document.createElement('div');
+      tempEl.setAttribute('data-morph-copy-fallback', 'true');
+      tempEl.style.position = 'fixed';
+      tempEl.style.left = '-9999px';
+      tempEl.style.top = '0';
+      tempEl.style.opacity = '0';
+      tempEl.style.pointerEvents = 'none';
+      tempEl.textContent = payload.plainText || ' ';
+      document.body.appendChild(tempEl);
+
+      let handledByCopyEvent = false;
+      const handleFallbackCopy = (event: Event) => {
+        const clipData = (event as ClipboardEvent).clipboardData;
+        if (clipData && typeof clipData.setData === 'function') {
+          clipData.setData('text/html', payload.html);
+          clipData.setData('text/plain', payload.plainText);
+          event.preventDefault();
+          handledByCopyEvent = true;
+        }
+      };
+
+      document.addEventListener('copy', handleFallbackCopy, true);
+      try {
+        if (sel && typeof document.createRange === 'function') {
+          const range = document.createRange();
+          range.selectNodeContents(tempEl);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        document.execCommand('copy');
+        if (handledByCopyEvent) {
+          copied = true;
+        }
+      } catch {
+        // Ignore DOM execCommand fallback errors
+      } finally {
+        document.removeEventListener('copy', handleFallbackCopy, true);
+        if (tempEl.parentNode) {
+          tempEl.parentNode.removeChild(tempEl);
+        }
+        if (sel) {
+          sel.removeAllRanges();
+          for (const saved of savedRanges) {
+            try {
+              sel.addRange(saved);
+            } catch {
+              // Ignore range restoration errors
+            }
+          }
+        }
+      }
+    }
+
+    if (!copied) {
+      try {
+        if (typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function') {
+          await navigator.clipboard.writeText(payload.plainText);
+        }
+      } catch {
+        // Clipboard API permission fallback in non-secure/headless context
+      }
     }
 
     setCopyFeedback(true);

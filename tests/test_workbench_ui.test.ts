@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { JSDOM } from 'jsdom';
@@ -400,6 +402,35 @@ describe('TestTargetSwitchingAndCardsReflow', () => {
       expect(pageEl!.style.width).toBe(expected.width);
       expect(pageEl!.style.height).toBe(expected.height);
     }
+  });
+
+  it('test_x_article_preview_stage_applies_platform_blockquote_border_style_without_inline_style_leakage', async () => {
+    const cssText = readFileSync(resolve(__dirname, '../src/styles/workbench.css'), 'utf-8');
+    const styleEl = document.createElement('style');
+    styleEl.textContent = cssText;
+    document.head.appendChild(styleEl);
+
+    const { container } = await mountWorkbench({
+      initialTargetId: 'x-article',
+      initialMarkdown: [
+        '# 让内容自由流动',
+        '',
+        '> 写一次，自由发布。让优秀的内容被更多人看见。',
+      ].join('\n'),
+    });
+
+    const previewStage = getByTestId(container, 'preview-stage');
+    expect(previewStage.getAttribute('data-target-view')).toBe('x-article');
+
+    const blockquote = previewStage.querySelector<HTMLElement>('blockquote.morph-quote');
+    expect(blockquote).not.toBeNull();
+    expect(blockquote!.textContent).toContain('写一次，自由发布。让优秀的内容被更多人看见。');
+    expect(blockquote!.getAttribute('style') ?? '').toBe('');
+
+    const computed = window.getComputedStyle(blockquote!);
+    expect(computed.borderLeftStyle).toBe('solid');
+    expect(parseFloat(computed.borderLeftWidth)).toBeGreaterThan(0);
+    expect(computed.marginLeft).toBe('0px');
   });
 });
 
@@ -860,5 +891,236 @@ describe('TestDeliveryCopyAndExport', () => {
       '局部选区二级标题'
     );
     expect(clipboardStore.get('text/html')).toContain('<h2');
+  });
+
+  it('test_clicking_primary_delivery_in_wechat_and_x_article_writes_dual_channel_clipboard_item_with_rich_html_and_clean_plain_text', async () => {
+    const store = assetStore();
+    const asset = await store.ingest(png(3, 24, 16), { fileName: 'sample-figure.png' });
+    const markdown = [
+      '# 让内容自由流动',
+      '',
+      '一份 Markdown，**三种发布形态**。',
+      '',
+      '> 写一次，自由发布。',
+      '',
+      '## 核心功能',
+      '',
+      '- 多平台适配',
+      '- 统一样式系统',
+      '',
+      `![示例图片](${asset.uri})`,
+    ].join('\n');
+
+    const writtenClipboardItems: Array<Record<string, Blob>> = [];
+    class MockClipboardItem {
+      readonly items: Record<string, Blob>;
+      constructor(items: Record<string, Blob>) {
+        this.items = items;
+      }
+      get types(): string[] {
+        return Object.keys(this.items);
+      }
+      async getType(type: string): Promise<Blob> {
+        const blob = this.items[type];
+        if (!blob) throw new Error(`Missing MIME type: ${type}`);
+        return blob;
+      }
+    }
+
+    Object.defineProperty(globalThis, 'ClipboardItem', {
+      value: MockClipboardItem,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(window, 'ClipboardItem', {
+      value: MockClipboardItem,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: {
+        write: async (items: MockClipboardItem[]) => {
+          for (const item of items) {
+            writtenClipboardItems.push(item.items);
+          }
+        },
+        writeText: async () => {
+          /* should not rely solely on writeText when ClipboardItem is available */
+        },
+      },
+      configurable: true,
+      writable: true,
+    });
+
+    const session = createEditorSession({
+      assetStore: store,
+      initialMarkdown: markdown,
+      debounceMs: 10,
+    });
+
+    const { container } = await mountWorkbench({
+      session,
+      assetStore: store,
+      initialTargetId: 'wechat',
+      debounceMs: 10,
+    });
+
+    // 1. Click primary delivery in wechat view
+    await clickTestId(container, 'primary-delivery-btn', session);
+    expect(writtenClipboardItems).toHaveLength(1);
+
+    const wechatHtmlBlob = writtenClipboardItems[0]['text/html'];
+    const wechatPlainBlob = writtenClipboardItems[0]['text/plain'];
+    expect(wechatHtmlBlob).toBeDefined();
+    expect(wechatPlainBlob).toBeDefined();
+
+    const wechatHtml = await wechatHtmlBlob.text();
+    const wechatPlain = await wechatPlainBlob.text();
+    const wechatDoc = documentOf(wechatHtml);
+    expect(wechatDoc.querySelector('h1')?.textContent).toContain('让内容自由流动');
+    expect(wechatDoc.querySelector('h2')?.textContent).toContain('核心功能');
+    expect(wechatDoc.querySelector('strong')?.textContent).toBe('三种发布形态');
+    expect(wechatDoc.querySelector('blockquote')?.textContent).toContain('写一次，自由发布。');
+    expect(wechatDoc.querySelectorAll('ul li')).toHaveLength(2);
+    expect(wechatDoc.querySelector('img')?.getAttribute('src')).toBe(asset.dataUrl);
+    expect(wechatPlain).not.toMatch(/\n{3,}/);
+    expect(wechatPlain).toContain('让内容自由流动\n一份 Markdown，三种发布形态。\n写一次，自由发布。\n核心功能');
+
+    // 2. Switch to x-article view and click primary delivery
+    await clickTestId(container, 'target-tab-x-article', session);
+    await clickTestId(container, 'primary-delivery-btn', session);
+    expect(writtenClipboardItems).toHaveLength(2);
+
+    const xHtmlBlob = writtenClipboardItems[1]['text/html'];
+    const xPlainBlob = writtenClipboardItems[1]['text/plain'];
+    expect(xHtmlBlob).toBeDefined();
+    expect(xPlainBlob).toBeDefined();
+
+    const xHtml = await xHtmlBlob.text();
+    const xPlain = await xPlainBlob.text();
+    const xDoc = documentOf(xHtml);
+    expect(xDoc.querySelector('h1, h2')?.textContent).toContain('让内容自由流动');
+    expect(xDoc.querySelector('strong')?.textContent).toBe('三种发布形态');
+    expect(xDoc.querySelector('blockquote')?.textContent).toContain('写一次，自由发布。');
+    expect(xDoc.querySelectorAll('ul li')).toHaveLength(2);
+    expect(xDoc.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/png;base64,/);
+    expect(xPlain).not.toMatch(/\n{3,}/);
+    expect(xPlain).toContain('让内容自由流动\n一份 Markdown，三种发布形态。\n写一次，自由发布。\n核心功能');
+  });
+
+  it('test_clicking_primary_delivery_falls_back_to_dom_copy_event_with_dual_mime_data_when_clipboard_item_is_unavailable_or_throws', async () => {
+    const store = assetStore();
+    const asset = await store.ingest(png(4, 20, 20), { fileName: 'fallback-figure.png' });
+    const markdown = [
+      '# 降级复制测试',
+      '',
+      '正文包含 **加粗强调**。',
+      '',
+      '> 引用段落内容。',
+      '',
+      '- 列表项 A',
+      '- 列表项 B',
+      '',
+      `![示例图片](${asset.uri})`,
+    ].join('\n');
+
+    const fallbackCopyEvents: Array<Map<string, string>> = [];
+    document.execCommand = ((commandId: string): boolean => {
+      if (commandId.toLowerCase() === 'copy') {
+        const mimeMap = new Map<string, string>();
+        const copyEvent = new window.Event('copy', { bubbles: true, cancelable: true });
+        Object.defineProperty(copyEvent, 'clipboardData', {
+          value: {
+            setData: (type: string, data: string) => {
+              mimeMap.set(type, data);
+            },
+            getData: (type: string) => mimeMap.get(type) ?? '',
+          },
+        });
+        const sel = window.getSelection();
+        const targetNode =
+          (sel && sel.rangeCount > 0 ? sel.getRangeAt(0).commonAncestorContainer : null) ||
+          document.activeElement ||
+          document.body;
+        const targetEl =
+          targetNode.nodeType === window.Node.ELEMENT_NODE
+            ? (targetNode as Element)
+            : targetNode.parentElement || document.body;
+        targetEl.dispatchEvent(copyEvent);
+        fallbackCopyEvents.push(mimeMap);
+        return true;
+      }
+      return false;
+    }) as typeof document.execCommand;
+
+    // Case 1: ClipboardItem is undefined
+    Object.defineProperty(globalThis, 'ClipboardItem', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(window, 'ClipboardItem', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+
+    const session = createEditorSession({
+      assetStore: store,
+      initialMarkdown: markdown,
+      debounceMs: 10,
+    });
+
+    const { container } = await mountWorkbench({
+      session,
+      assetStore: store,
+      initialTargetId: 'x-article',
+      debounceMs: 10,
+    });
+
+    await clickTestId(container, 'primary-delivery-btn', session);
+    expect(fallbackCopyEvents).toHaveLength(1);
+    const firstCopy = fallbackCopyEvents[0];
+    expect(firstCopy.get('text/html')).toBeTruthy();
+    expect(firstCopy.get('text/plain')).toBeTruthy();
+
+    const firstDoc = documentOf(firstCopy.get('text/html')!);
+    expect(firstDoc.querySelector('strong')?.textContent).toBe('加粗强调');
+    expect(firstDoc.querySelector('blockquote')?.textContent).toContain('引用段落内容。');
+    expect(firstDoc.querySelectorAll('ul li')).toHaveLength(2);
+    expect(firstDoc.querySelector('img')?.getAttribute('src')).toBe(asset.dataUrl);
+    expect(firstCopy.get('text/plain')).not.toMatch(/\n{3,}/);
+    expect(firstCopy.get('text/plain')).toContain('降级复制测试\n正文包含 加粗强调。\n引用段落内容。');
+
+    // Case 2: ClipboardItem exists but navigator.clipboard.write rejects
+    class ThrowingClipboardItem {
+      constructor(public readonly items: Record<string, Blob>) {}
+    }
+    Object.defineProperty(globalThis, 'ClipboardItem', {
+      value: ThrowingClipboardItem,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(window, 'ClipboardItem', {
+      value: ThrowingClipboardItem,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: {
+        write: async () => {
+          throw new Error('NotAllowedError: Clipboard write blocked');
+        },
+        writeText: async () => {},
+      },
+      configurable: true,
+      writable: true,
+    });
+
+    await clickTestId(container, 'primary-delivery-btn', session);
+    expect(fallbackCopyEvents).toHaveLength(2);
+    const secondCopy = fallbackCopyEvents[1];
+    expect(secondCopy.get('text/html')).toContain('<strong');
+    expect(secondCopy.get('text/plain')).not.toMatch(/\n{3,}/);
   });
 });

@@ -571,6 +571,82 @@ body,
   margin: 14px 0;
 }
 
+/* X Articles (x-article) Platform-Native Typography Simulation */
+.morph-preview-stage[data-target-view="x-article"] .morph-doc {
+  color: #0f1419;
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+.morph-preview-stage[data-target-view="x-article"] h1 {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.3;
+  margin: 0 0 18px 0;
+  color: #0f1419;
+  letter-spacing: -0.02em;
+}
+
+.morph-preview-stage[data-target-view="x-article"] h2 {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 26px 0 12px 0;
+  color: #0f1419;
+  letter-spacing: -0.01em;
+}
+
+.morph-preview-stage[data-target-view="x-article"] p {
+  margin: 0 0 16px 0;
+  line-height: 1.75;
+  color: #0f1419;
+}
+
+.morph-preview-stage[data-target-view="x-article"] blockquote,
+.morph-preview-stage[data-target-view="x-article"] blockquote.morph-quote {
+  margin: 18px 0;
+  margin-left: 0px;
+  margin-right: 0px;
+  padding: 2px 0 2px 16px;
+  border-left-width: 3px;
+  border-left-style: solid;
+  border-left-color: #536471;
+  color: #0f1419;
+}
+
+.morph-preview-stage[data-target-view="x-article"] blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.morph-preview-stage[data-target-view="x-article"] ul,
+.morph-preview-stage[data-target-view="x-article"] ol {
+  margin: 14px 0 18px 0;
+  padding-left: 24px;
+}
+
+.morph-preview-stage[data-target-view="x-article"] li {
+  margin: 6px 0;
+  line-height: 1.7;
+}
+
+.morph-preview-stage[data-target-view="x-article"] pre {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background-color: #f7f9f9;
+  border: 1px solid #cfd9de;
+  font-family: var(--ui-font-mono);
+  font-size: 13.5px;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+.morph-preview-stage[data-target-view="x-article"] hr {
+  border: none;
+  border-top: 1px solid #cfd9de;
+  margin: 24px 0;
+}
+
 /* Right Column: Style Settings Drawer */
 .morph-style-drawer {
   flex: 0 0 auto;

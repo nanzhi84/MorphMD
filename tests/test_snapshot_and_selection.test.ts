@@ -517,4 +517,74 @@ describe('TestSelectionContextNormalizer', () => {
     expect(payload.plainText).toContain('diagram');
     expect(payload.plainText).toContain('$a+b$');
   });
+
+  it('test_multi_block_compiled_snapshot_and_dom_selection_normalize_inter_block_newlines_while_preserving_inline_and_code_whitespace', async () => {
+    const store = assetStore();
+    const asset = await store.ingest(png());
+    const markdown = [
+      '# 让内容自由流动',
+      '',
+      '一份 Markdown，**三种发布形态** *随时切换*。',
+      '',
+      '> 写一次，自由发布。',
+      '',
+      '## 核心功能',
+      '',
+      '- 多平台适配',
+      '- 统一样式系统',
+      '',
+      `![示例图片](${asset.uri})`,
+      '',
+      '```ts',
+      'const alpha = 1;',
+      '  const beta = 2;',
+      '```',
+      '',
+      '| 平台 | 模式 |',
+      '| --- | --- |',
+      '| 公众号 | 富文本 |',
+    ].join('\n');
+
+    for (const target of ['wechat', 'x-article'] as const) {
+      const snapshot = await buildDeliverySnapshot(markdown, target, store);
+      const fullPayload = serializeFullSnapshot(snapshot, store);
+      evidence(`selection-multi-block-normalized-${target}`, fullPayload);
+
+      expect(fullPayload.plainText).not.toMatch(/\n{3,}/);
+      expect(fullPayload.plainText).toContain(
+        [
+          '让内容自由流动',
+          '一份 Markdown，三种发布形态 随时切换。',
+          '写一次，自由发布。',
+          '核心功能',
+          '多平台适配',
+          '统一样式系统',
+          '[Image: 示例图片]',
+        ].join('\n')
+      );
+      expect(fullPayload.plainText).toContain('const alpha = 1;\n  const beta = 2;');
+      expect(fullPayload.plainText).toContain('平台\t模式\n公众号\t富文本');
+    }
+
+    const { doc, root, snapshot: domSnapshot } = selectionFixture(
+      '<h1>标题一</h1>\n  <p><strong>加粗</strong> <em>斜体</em><br>第二行</p>\n  <blockquote>\n    <p>引用第一段</p>\n    <p>引用第二段</p>\n  </blockquote>\n  <ul>\n    <li>列表项一</li>\n    <li>列表项二</li>\n  </ul>'
+    );
+    const fullRange = doc.createRange();
+    fullRange.selectNodeContents(root);
+    const rangePayload = normalizeSelectionRange(fullRange, root, domSnapshot, store);
+    expect(rangePayload.plainText).toBe(
+      ['标题一', '加粗 斜体\n第二行', '引用第一段', '引用第二段', '列表项一', '列表项二'].join('\n')
+    );
+
+    const boundaryFixture = selectionFixture('<p> 前置空格<br>后置空格 </p>');
+    const boundaryRange = boundaryFixture.doc.createRange();
+    boundaryRange.selectNodeContents(boundaryFixture.root.querySelector('p')!);
+    const boundaryPayload = normalizeSelectionRange(
+      boundaryRange,
+      boundaryFixture.root,
+      boundaryFixture.snapshot,
+      store
+    );
+    expect(boundaryPayload.plainText).toBe(' 前置空格\n后置空格 ');
+  });
 });
