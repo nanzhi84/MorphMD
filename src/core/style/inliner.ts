@@ -13,6 +13,7 @@ export interface InlineStyleOptions {
   customCss?: string;
   tokens?: Partial<DesignTokens>;
   capabilities?: AdapterCapabilities;
+  afterInline?: (rootContainer: HTMLElement, doc: Document, diagnostics: DiagnosticItem[]) => void;
 }
 
 export interface InlineStyleResult {
@@ -89,6 +90,7 @@ ${tokenCssLines}
   return runInDomSandbox(html, fullCss, (rootContainer, doc, win) => {
     const sheet = doc.styleSheets[doc.styleSheets.length - 1];
     const rules = sheet && sheet.cssRules ? flattenRules(sheet.cssRules, win, doc) : [];
+    const phase1ScopeCache = new WeakMap<Element, Record<string, string>>();
 
     // 3.1 Materialize simple decorative pseudo elements (::before / ::after) with full cascade
     const elementsWithPseudos = new Set<Element>();
@@ -187,7 +189,7 @@ ${tokenCssLines}
 
         if (allowStyles) {
           const inlineStylesList: string[] = [];
-          const hostScope = computeElementVarScope(el, rootContainer, doc, rules, allTokens);
+          const hostScope = computeElementVarScope(el, rootContainer, doc, rules, allTokens, phase1ScopeCache);
           const pseudoRawLocal: Record<string, string> = {};
           const pseudoRawLocalLayers: Record<string, LayerCandidate[]> = {};
           for (const [prop, layerDecls] of customByLayer.entries()) {
@@ -221,29 +223,75 @@ ${tokenCssLines}
     }
 
     // 3.2 Sanitize / Filter pre-existing inline styles (clean native blocks on x-article)
-    const elementsWithStyle = [rootContainer, ...Array.from(rootContainer.querySelectorAll('[style]'))];
-    elementsWithStyle.forEach((el) => {
-      const isRaster = isRasterBlockOrDescendant(el, capabilities);
-      if (!capabilities.allowInlineStyles && !isRaster) {
-        const nodeId = el.getAttribute('data-node-id') || undefined;
-        const rangeStr = el.getAttribute('data-source-range');
-        const sourceRange = rangeStr ? (rangeStr.split('-').map(Number) as [number, number]) : undefined;
-        el.removeAttribute('style');
-        allDiagnostics.push({
-          code: 'style/platform-unsupported-inlining',
-          message: 'Inline style attribute on native block removed in x-article.',
-          severity: 'info',
-          targetId: capabilities.targetId,
-          nodeId,
-          sourceRange,
-        });
-      }
-    });
+    if (!capabilities.allowInlineStyles) {
+      const elementsWithStyle = [rootContainer, ...Array.from(rootContainer.querySelectorAll('[style]'))];
+      elementsWithStyle.forEach((el) => {
+        const isRaster = isRasterBlockOrDescendant(el, capabilities);
+        if (!isRaster) {
+          const nodeId = el.getAttribute('data-node-id') || undefined;
+          const rangeStr = el.getAttribute('data-source-range');
+          const sourceRange = rangeStr ? (rangeStr.split('-').map(Number) as [number, number]) : undefined;
+          el.removeAttribute('style');
+          allDiagnostics.push({
+            code: 'style/platform-unsupported-inlining',
+            message: 'Inline style attribute on native block removed in x-article.',
+            severity: 'info',
+            targetId: capabilities.targetId,
+            nodeId,
+            sourceRange,
+          });
+        }
+      });
+    }
 
     // 3.3 Two-Phase Inlining: Phase 1: Compute styles without mutating el.style
     const computedStylesMap = new Map<Element, Map<string, string>>();
+    const computedDeclCache = new WeakMap<Element, CSSStyleDeclaration>();
+    const rasterCache = new WeakMap<Element, boolean>();
+    const getIsRaster = (el: Element): boolean => {
+      if (rasterCache.has(el)) return rasterCache.get(el)!;
+      const res = isRasterBlockOrDescendant(el, capabilities);
+      rasterCache.set(el, res);
+      return res;
+    };
+    const getComputedDecl = (el: Element): CSSStyleDeclaration => {
+      let decl = computedDeclCache.get(el);
+      if (!decl) {
+        decl = win.getComputedStyle(el);
+        computedDeclCache.set(el, decl);
+      }
+      return decl;
+    };
 
-    for (const rule of rules) {
+    const hasPositionalOrAttrSelectors = /(:nth|:first|:last|:only|:empty|:has|\+|~|\[)/i.test(
+      analysis.sanitizedCss
+    );
+    const profileKeyCache = new WeakMap<Element, string | null>();
+    const getElementProfileKey = (el: Element): string | null => {
+      if (hasPositionalOrAttrSelectors || el === rootContainer) return null;
+      if (profileKeyCache.has(el)) return profileKeyCache.get(el)!;
+      if (el.id || el.getAttribute('style')) {
+        profileKeyCache.set(el, null);
+        return null;
+      }
+      const parent = el.parentElement;
+      if (!parent) {
+        profileKeyCache.set(el, null);
+        return null;
+      }
+      const parentKey = parent === rootContainer ? 'ROOT' : getElementProfileKey(parent);
+      if (parentKey === null) {
+        profileKeyCache.set(el, null);
+        return null;
+      }
+      const key = `${parentKey}>${el.tagName}.${el.getAttribute('class') || ''}`;
+      profileKeyCache.set(el, key);
+      return key;
+    };
+    const ruleProfilePropsCache = new Map<string, Array<[string, string]>>();
+
+    for (let ruleIdx = 0; ruleIdx < rules.length; ruleIdx++) {
+        const rule = rules[ruleIdx];
         if (!rule.selectorText || !rule.style) continue;
 
         let matched: Element[];
@@ -263,7 +311,7 @@ ${tokenCssLines}
         }
 
         for (const el of matched) {
-          const isRaster = isRasterBlockOrDescendant(el, capabilities);
+          const isRaster = getIsRaster(el);
           const allowInline = capabilities.allowInlineStyles || isRaster;
           if (!allowInline) {
             const nodeId = el.getAttribute('data-node-id') || undefined;
@@ -291,16 +339,29 @@ ${tokenCssLines}
             computedStylesMap.set(el, elStyleMap);
           }
 
-          // Build element-scoped custom properties map for JSDOM fallback
-          const elScopedVariables = computeElementVarScope(el, rootContainer, doc, rules, allTokens);
+          const profileKey = getElementProfileKey(el);
+          const ruleCacheKey = profileKey !== null ? `${ruleIdx}|${profileKey}` : null;
+          if (ruleCacheKey !== null) {
+            const cachedProps = ruleProfilePropsCache.get(ruleCacheKey);
+            if (cachedProps !== undefined) {
+              for (let i = 0; i < cachedProps.length; i++) {
+                elStyleMap.set(cachedProps[i][0], cachedProps[i][1]);
+              }
+              continue;
+            }
+          }
 
-          const computed = win.getComputedStyle(el);
+          const recordedProps: Array<[string, string]> | null = ruleCacheKey !== null ? [] : null;
+          let hadRuleDiagnostic = false;
+          let elScopedVariables: Record<string, string> | null = null;
+          const computed = getComputedDecl(el);
 
           // Border shorthand preservation
           const ruleBorder = rule.style.getPropertyValue('border');
           if (ruleBorder) {
             const computedBorder = computed.getPropertyValue('border') || ruleBorder;
             elStyleMap.set('border', computedBorder);
+            if (recordedProps) recordedProps.push(['border', computedBorder]);
           }
 
           for (let i = 0; i < rule.style.length; i++) {
@@ -310,6 +371,7 @@ ${tokenCssLines}
             let val = computed.getPropertyValue(prop) || rule.style.getPropertyValue(prop);
 
             if (prop === 'position' && /\bfixed\b/i.test(val)) {
+              hadRuleDiagnostic = true;
               allDiagnostics.push({
                 code: 'style/forbidden-fixed-position',
                 message: 'position: fixed is disallowed.',
@@ -333,15 +395,25 @@ ${tokenCssLines}
 
             if (val && val.endsWith('em') && prop === 'font-size') {
               const multiplier = parseFloat(val);
-              const parentFontSize = el.parentElement ? win.getComputedStyle(el.parentElement).fontSize : '16px';
+              const parentFontSize = el.parentElement ? getComputedDecl(el.parentElement).fontSize : '16px';
               const parentPx = parseFloat(parentFontSize) || 16;
               val = `${multiplier * parentPx}px`;
             }
 
-            val = resolveCssVariables(val, elScopedVariables);
+            if (val && val.includes('var(')) {
+              if (!elScopedVariables) {
+                elScopedVariables = computeElementVarScope(el, rootContainer, doc, rules, allTokens, phase1ScopeCache);
+              }
+              val = resolveCssVariables(val, elScopedVariables);
+            }
             if (val) {
               elStyleMap.set(prop, val);
+              if (recordedProps) recordedProps.push([prop, val]);
             }
+          }
+
+          if (ruleCacheKey !== null && recordedProps && !hadRuleDiagnostic) {
+            ruleProfilePropsCache.set(ruleCacheKey, recordedProps);
           }
         }
       }
@@ -372,22 +444,44 @@ ${tokenCssLines}
     }
 
     // Phase 2: Apply recorded styles to elements
+    const profileNormalizedStyleAttrCache = new Map<string, string>();
     for (const [el, styleMap] of computedStylesMap.entries()) {
       const htmlEl = el as HTMLElement;
-      for (const [prop, val] of styleMap.entries()) {
-        htmlEl.style.setProperty(prop, val);
+      const profileKey = profileKeyCache.get(el) ?? null;
+      if (profileKey !== null) {
+        const cachedAttr = profileNormalizedStyleAttrCache.get(profileKey);
+        if (cachedAttr !== undefined) {
+          if (cachedAttr) {
+            htmlEl.setAttribute('style', cachedAttr);
+          }
+          continue;
+        }
+        for (const [prop, val] of styleMap.entries()) {
+          htmlEl.style.setProperty(prop, val);
+        }
+        profileNormalizedStyleAttrCache.set(profileKey, htmlEl.getAttribute('style') || '');
+      } else {
+        for (const [prop, val] of styleMap.entries()) {
+          htmlEl.style.setProperty(prop, val);
+        }
       }
     }
 
-    // 3.4 Disallowed fixed position check across all elements with style
-    const allElements = [rootContainer, ...Array.from(rootContainer.querySelectorAll<HTMLElement>('[style], *'))];
-    for (const el of allElements) {
-      if (!(el as HTMLElement).style) continue;
+    // 3.4 Disallowed fixed position check across elements
+    const hasPositionRules = analysis.propertyWhitelist.has('position');
+    const positionCandidates = hasPositionRules
+      ? [rootContainer, ...Array.from(rootContainer.querySelectorAll<HTMLElement>('[style], *'))]
+      : [rootContainer, ...Array.from(rootContainer.querySelectorAll<HTMLElement>('[style*="position" i], [style*="position"]'))];
+    for (const el of positionCandidates) {
+      const styleObj = (el as HTMLElement).style;
+      if (!styleObj) continue;
+      const inlinePos = styleObj.position;
       let computedPos: string | undefined;
-      try {
-        computedPos = win.getComputedStyle(el)?.position;
-      } catch {}
-      const inlinePos = (el as HTMLElement).style.position;
+      if (hasPositionRules || inlinePos) {
+        try {
+          computedPos = win.getComputedStyle(el)?.position;
+        } catch {}
+      }
       if (computedPos === 'fixed' || inlinePos === 'fixed' || /\bfixed\b/i.test(inlinePos || '')) {
         allDiagnostics.push({
           code: 'style/forbidden-fixed-position',
@@ -395,13 +489,17 @@ ${tokenCssLines}
           severity: 'error',
           property: 'position',
         });
-        (el as HTMLElement).style.removeProperty('position');
+        styleObj.removeProperty('position');
       }
     }
 
     // Resolve any remaining inline CSS variables before filtering allowedStyleProps
-    const allStyled = [rootContainer, ...Array.from(rootContainer.querySelectorAll<HTMLElement>('[style]'))];
-    for (const el of allStyled) {
+    const postPhase2ScopeCache = new WeakMap<Element, Record<string, string>>();
+    const allStyledWithVar = [
+      ...(rootContainer.getAttribute('style')?.includes('var(') ? [rootContainer] : []),
+      ...Array.from(rootContainer.querySelectorAll<HTMLElement>('[style*="var("]')),
+    ];
+    for (const el of allStyledWithVar) {
       if (!el.getAttribute('style')) continue;
       const currentProps: string[] = [];
       for (let i = 0; i < el.style.length; i++) {
@@ -415,7 +513,7 @@ ${tokenCssLines}
             resolved = win.getComputedStyle(el).getPropertyValue(p);
           } catch {}
           if (!resolved || resolved.includes('var(')) {
-            const vars = computeElementVarScope(el, rootContainer, doc, rules, allTokens);
+            const vars = computeElementVarScope(el, rootContainer, doc, rules, allTokens, postPhase2ScopeCache);
             resolved = resolveCssVariables(val, vars);
           }
           if (resolved) {
@@ -431,17 +529,30 @@ ${tokenCssLines}
     }
 
     // 3.5 Ensure strict compliance with allowedStyleProps across all styled elements
+    const hasExplicitAllowedProps = Boolean(capabilities.allowedStyleProps && capabilities.allowedStyleProps.size > 0);
+    const allowsColor = hasExplicitAllowedProps ? capabilities.allowedStyleProps!.has('color') : true;
+    const verifiedExplicitStyleAttrs = new Set<string>();
+    const verifiedDefaultStyleAttrs = new Set<string>();
     const allStyledFinal = [rootContainer, ...Array.from(rootContainer.querySelectorAll<HTMLElement>('[style]'))];
     for (const el of allStyledFinal) {
-      if (!el.getAttribute('style')) continue;
-      const isRaster = isRasterBlockOrDescendant(el, capabilities);
-      const allowed = isRaster
-        ? (capabilities.allowedStyleProps && capabilities.allowedStyleProps.size > 0
-            ? capabilities.allowedStyleProps
-            : DEFAULT_ALLOWED_STYLE_PROPS)
+      const styleAttr = el.getAttribute('style');
+      if (!styleAttr) continue;
+      if (allowsColor && /^color:\s*#[0-9a-fA-F]{3,8}\s*;?$/.test(styleAttr)) {
+        continue;
+      }
+      const isDefaultRaster = !hasExplicitAllowedProps && getIsRaster(el);
+      const allowed = hasExplicitAllowedProps
+        ? capabilities.allowedStyleProps
+        : isDefaultRaster
+        ? DEFAULT_ALLOWED_STYLE_PROPS
         : capabilities.allowedStyleProps;
 
       if (allowed) {
+        const verifiedSet = isDefaultRaster ? verifiedDefaultStyleAttrs : verifiedExplicitStyleAttrs;
+        if (verifiedSet.has(styleAttr)) {
+          continue;
+        }
+        let removedAny = false;
         const currentProps: string[] = [];
         for (let i = 0; i < el.style.length; i++) {
           currentProps.push(el.style[i]);
@@ -451,12 +562,19 @@ ${tokenCssLines}
             allowed.has(p) || (allowed.has('border') && (p === 'border' || p.startsWith('border-')));
           if (!isPropAllowed) {
             el.style.removeProperty(p);
+            removedAny = true;
           }
         }
-        if (el.style.length === 0) {
+        if (!removedAny) {
+          verifiedSet.add(styleAttr);
+        } else if (el.style.length === 0) {
           el.removeAttribute('style');
         }
       }
+    }
+
+    if (options.afterInline) {
+      options.afterInline(rootContainer, doc, allDiagnostics);
     }
 
     const finalHtml = rootContainer.outerHTML;

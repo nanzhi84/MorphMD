@@ -1,0 +1,303 @@
+{
+  "environment": "Chromium (Real Browser via Playwright)",
+  "stageBreakdown": {
+    "small (2 sections, ~70 lines)": {
+      "markdownChars": 1436,
+      "markdownLines": 60,
+      "targets": {
+        "wechat": {
+          "coldCache": {
+            "astCompileMs": 61.7,
+            "styleInlineMs": 50.6,
+            "domAssetAndNormalizeMs": 1.1,
+            "fromHtmlHastMs": 3.6,
+            "totalMs": 117,
+            "domNodesCount": 496,
+            "htmlChars": 48319
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 5.7,
+            "styleInlineMs": 9.7,
+            "domAssetAndNormalizeMs": 1,
+            "fromHtmlHastMs": 1.5,
+            "totalMs": 17.9,
+            "domNodesCount": 496,
+            "htmlChars": 48319
+          }
+        },
+        "x-article": {
+          "coldCache": {
+            "astCompileMs": 7.2,
+            "styleInlineMs": 5.5,
+            "domAssetAndNormalizeMs": 33.2,
+            "fromHtmlHastMs": 36.3,
+            "totalMs": 82.2,
+            "domNodesCount": 496,
+            "htmlChars": 2277791
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 10.5,
+            "styleInlineMs": 15.4,
+            "domAssetAndNormalizeMs": 26.9,
+            "fromHtmlHastMs": 42.8,
+            "totalMs": 95.6,
+            "domNodesCount": 496,
+            "htmlChars": 2277791
+          }
+        },
+        "cards": {
+          "coldCache": {
+            "astCompileMs": 20.2,
+            "styleInlineMs": 8.3,
+            "domAssetAndNormalizeMs": 1.7,
+            "fromHtmlHastMs": 1.7,
+            "totalMs": 31.9,
+            "domNodesCount": 496,
+            "htmlChars": 51343
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 4.1,
+            "styleInlineMs": 7.3,
+            "domAssetAndNormalizeMs": 1.1,
+            "fromHtmlHastMs": 1.7,
+            "totalMs": 14.2,
+            "domNodesCount": 496,
+            "htmlChars": 51343
+          }
+        }
+      }
+    },
+    "medium (8 sections, ~260 lines)": {
+      "markdownChars": 5474,
+      "markdownLines": 228,
+      "targets": {
+        "wechat": {
+          "coldCache": {
+            "astCompileMs": 18.9,
+            "styleInlineMs": 24.4,
+            "domAssetAndNormalizeMs": 3,
+            "fromHtmlHastMs": 6.2,
+            "totalMs": 52.5,
+            "domNodesCount": 1870,
+            "htmlChars": 183733
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 13.1,
+            "styleInlineMs": 23.7,
+            "domAssetAndNormalizeMs": 2.9,
+            "fromHtmlHastMs": 6.6,
+            "totalMs": 46.3,
+            "domNodesCount": 1870,
+            "htmlChars": 183733
+          }
+        },
+        "x-article": {
+          "coldCache": {
+            "astCompileMs": 15.9,
+            "styleInlineMs": 14,
+            "domAssetAndNormalizeMs": 104.2,
+            "fromHtmlHastMs": 230.8,
+            "totalMs": 364.9,
+            "domNodesCount": 1870,
+            "htmlChars": 8924336
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 18.5,
+            "styleInlineMs": 12.6,
+            "domAssetAndNormalizeMs": 105.2,
+            "fromHtmlHastMs": 230.5,
+            "totalMs": 366.8,
+            "domNodesCount": 1870,
+            "htmlChars": 8924336
+          }
+        },
+        "cards": {
+          "coldCache": {
+            "astCompileMs": 22.4,
+            "styleInlineMs": 21,
+            "domAssetAndNormalizeMs": 3,
+            "fromHtmlHastMs": 9.9,
+            "totalMs": 56.3,
+            "domNodesCount": 1870,
+            "htmlChars": 194550
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 12.6,
+            "styleInlineMs": 21.1,
+            "domAssetAndNormalizeMs": 2.6,
+            "fromHtmlHastMs": 6.5,
+            "totalMs": 42.8,
+            "domNodesCount": 1870,
+            "htmlChars": 194550
+          }
+        }
+      }
+    },
+    "large (20 sections, ~650 lines)": {
+      "markdownChars": 13737,
+      "markdownLines": 564,
+      "targets": {
+        "wechat": {
+          "coldCache": {
+            "astCompileMs": 43.3,
+            "styleInlineMs": 56.2,
+            "domAssetAndNormalizeMs": 7.5,
+            "fromHtmlHastMs": 18.2,
+            "totalMs": 125.2,
+            "domNodesCount": 4684,
+            "htmlChars": 461291
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 32.4,
+            "styleInlineMs": 55.9,
+            "domAssetAndNormalizeMs": 7.3,
+            "fromHtmlHastMs": 17.4,
+            "totalMs": 113,
+            "domNodesCount": 4684,
+            "htmlChars": 461291
+          }
+        },
+        "x-article": {
+          "coldCache": {
+            "astCompileMs": 39.4,
+            "styleInlineMs": 29.9,
+            "domAssetAndNormalizeMs": 258.4,
+            "fromHtmlHastMs": 811.8,
+            "totalMs": 1139.5,
+            "domNodesCount": 4684,
+            "htmlChars": 22408126
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 39.9,
+            "styleInlineMs": 31.6,
+            "domAssetAndNormalizeMs": 269,
+            "fromHtmlHastMs": 802.1,
+            "totalMs": 1142.6,
+            "domNodesCount": 4684,
+            "htmlChars": 22408126
+          }
+        },
+        "cards": {
+          "coldCache": {
+            "astCompileMs": 44.9,
+            "styleInlineMs": 45.2,
+            "domAssetAndNormalizeMs": 6.3,
+            "fromHtmlHastMs": 22.5,
+            "totalMs": 118.9,
+            "domNodesCount": 4684,
+            "htmlChars": 484500
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 32.9,
+            "styleInlineMs": 46.6,
+            "domAssetAndNormalizeMs": 6.3,
+            "fromHtmlHastMs": 22.4,
+            "totalMs": 108.2,
+            "domNodesCount": 4684,
+            "htmlChars": 484500
+          }
+        }
+      }
+    },
+    "xlarge (185 sections, ~5200 lines)": {
+      "markdownChars": 129049,
+      "markdownLines": 5184,
+      "targets": {
+        "wechat": {
+          "coldCache": {
+            "astCompileMs": 412.5,
+            "styleInlineMs": 519.6,
+            "domAssetAndNormalizeMs": 69.4,
+            "fromHtmlHastMs": 336.4,
+            "totalMs": 1337.9,
+            "domNodesCount": 43459,
+            "htmlChars": 4265180
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 398.4,
+            "styleInlineMs": 516.8,
+            "domAssetAndNormalizeMs": 67.5,
+            "fromHtmlHastMs": 339.4,
+            "totalMs": 1322.1,
+            "domNodesCount": 43459,
+            "htmlChars": 4265180
+          }
+        },
+        "x-article": {
+          "coldCache": {
+            "astCompileMs": 395.2,
+            "styleInlineMs": 276.6,
+            "domAssetAndNormalizeMs": 2390.2,
+            "fromHtmlHastMs": 7509.1,
+            "totalMs": 10571.1,
+            "domNodesCount": 43459,
+            "htmlChars": 207275165
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 392.1,
+            "styleInlineMs": 292.3,
+            "domAssetAndNormalizeMs": 2488.2,
+            "fromHtmlHastMs": 7419.4,
+            "totalMs": 10592,
+            "domNodesCount": 43459,
+            "htmlChars": 207275165
+          }
+        },
+        "cards": {
+          "coldCache": {
+            "astCompileMs": 415.3,
+            "styleInlineMs": 418.1,
+            "domAssetAndNormalizeMs": 58.3,
+            "fromHtmlHastMs": 574.6,
+            "totalMs": 1466.3,
+            "domNodesCount": 43459,
+            "htmlChars": 4481625
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 401.2,
+            "styleInlineMs": 431,
+            "domAssetAndNormalizeMs": 58.3,
+            "fromHtmlHastMs": 605.3,
+            "totalMs": 1495.8,
+            "domNodesCount": 43459,
+            "htmlChars": 4481625
+          }
+        }
+      }
+    }
+  },
+  "typingSimulation": {
+    "small (2 sections, ~70 lines)": {
+      "keystrokeCount": 30,
+      "avgKeystrokeCallMs": 0.0067,
+      "maxKeystrokeCallMs": 0.1,
+      "debouncedCommitTotalElapsedMs": 156.7,
+      "syncPhaseInRunSnapshotBuildMs": 16.9,
+      "fullRunSnapshotBuildMs": 33
+    },
+    "medium (8 sections, ~260 lines)": {
+      "keystrokeCount": 30,
+      "avgKeystrokeCallMs": 0.0033,
+      "maxKeystrokeCallMs": 0.1,
+      "debouncedCommitTotalElapsedMs": 223.1,
+      "syncPhaseInRunSnapshotBuildMs": 54.1,
+      "fullRunSnapshotBuildMs": 104.7
+    },
+    "large (20 sections, ~650 lines)": {
+      "keystrokeCount": 30,
+      "avgKeystrokeCallMs": 0,
+      "maxKeystrokeCallMs": 0,
+      "debouncedCommitTotalElapsedMs": 359.7,
+      "syncPhaseInRunSnapshotBuildMs": 115,
+      "fullRunSnapshotBuildMs": 225.3
+    },
+    "xlarge (185 sections, ~5200 lines)": {
+      "keystrokeCount": 30,
+      "avgKeystrokeCallMs": 0.0033,
+      "maxKeystrokeCallMs": 0.1,
+      "debouncedCommitTotalElapsedMs": 2768.4,
+      "syncPhaseInRunSnapshotBuildMs": 1318.2,
+      "fullRunSnapshotBuildMs": 2642.5
+    }
+  }
+}

@@ -2,12 +2,15 @@ import { visit } from 'unist-util-visit';
 import type { Element, Root } from 'hast';
 import { AssetStore } from '../assets/store';
 import type { AssetRecord } from '../assets/types';
+import { compileMarkdownSync } from '../ast/compiler';
+import { getLoadedHighlighter } from '../ast/math-code';
 import type { CompileOptions } from '../ast/types';
 import type { CardsPaginationOptions } from '../cards/types';
 import type { DesignTokens } from '../style/tokens';
 import {
   buildDeliverySnapshot,
   createDeliverySnapshotSync,
+  getSnapshotReferencedAssetIds,
   type SnapshotOptions,
 } from '../snapshot/builder';
 import type {
@@ -53,22 +56,25 @@ function createProvisionalUnreadySnapshot(base: DeliverySnapshot): DeliverySnaps
   if (!base.ready) {
     return base;
   }
-  const cloned: DeliverySnapshot = {
-    version: { ...base.version },
+  const hastDesc = Object.getOwnPropertyDescriptor(base, 'hast');
+  const cloned = {
+    version: Object.freeze({ ...base.version }),
     targetId: base.targetId,
     ready: false,
-    hast: base.hast,
     html: base.html,
-    diagnostics: [
+    diagnostics: Object.freeze([
       ...base.diagnostics,
-      {
+      Object.freeze({
         code: 'snapshot/async-compile-pending',
         message: 'Asynchronous snapshot compilation is in progress.',
-        severity: 'info',
-      },
-    ],
+        severity: 'info' as const,
+      }),
+    ]),
     sourceMap: base.sourceMap,
-  };
+  } as DeliverySnapshot;
+  if (hastDesc) {
+    Object.defineProperty(cloned, 'hast', hastDesc);
+  }
   return Object.freeze(cloned);
 }
 
@@ -490,28 +496,61 @@ export class EditorSessionController {
       cardsOptions: this.cardsOptions,
     };
 
-    // Synchronously compute provisional snapshot & update AST asset reference counts
-    const syncSnapshot = createDeliverySnapshotSync(
-      markdown,
-      currentTargetId,
-      this.assetStore,
-      snapshotOptions
-    );
-    const nextAssetIds = extractAssetIdsFromHast(syncSnapshot.hast as Root);
-    this.reconcileAssetReferences(nextAssetIds);
+    const canReuseSyncSnapshot =
+      this.snapshotBuilder === buildDeliverySnapshot && getLoadedHighlighter() !== null;
 
-    // Expose synchronous provisional snapshot (with ready: false) if no newer committed snapshot exists
-    if (requestSeq >= this.latestCommittedSeq) {
-      this.currentSnapshot = createProvisionalUnreadySnapshot(syncSnapshot);
-    }
-
-    const buildPromise = (async (): Promise<DeliverySnapshot> => {
-      const builtSnapshot = await this.snapshotBuilder(
+    let prebuiltSyncSnapshot: DeliverySnapshot | null = null;
+    if (canReuseSyncSnapshot) {
+      prebuiltSyncSnapshot = createDeliverySnapshotSync(
         markdown,
         currentTargetId,
         this.assetStore,
         snapshotOptions
       );
+      const nextAssetIds =
+        getSnapshotReferencedAssetIds(prebuiltSyncSnapshot) ??
+        extractAssetIdsFromHast(prebuiltSyncSnapshot.hast as Root);
+      this.reconcileAssetReferences(nextAssetIds);
+
+      if (requestSeq >= this.latestCommittedSeq) {
+        this.currentSnapshot = createProvisionalUnreadySnapshot(prebuiltSyncSnapshot);
+      }
+    } else {
+      // Lightweight AST pass only: reconcile asset reference counts and expose provisional unready state
+      const astOnly = compileMarkdownSync(markdown, this.compileOptions);
+      const nextAssetIds = extractAssetIdsFromHast(astOnly.hast as Root);
+      this.reconcileAssetReferences(nextAssetIds);
+
+      if (requestSeq >= this.latestCommittedSeq) {
+        const provisional: DeliverySnapshot = Object.freeze({
+          version: { ...targetVersion },
+          targetId: currentTargetId,
+          ready: false,
+          hast: astOnly.hast,
+          html: astOnly.html,
+          diagnostics: [
+            ...astOnly.diagnostics,
+            {
+              code: 'snapshot/async-compile-pending',
+              message: 'Asynchronous snapshot compilation is in progress.',
+              severity: 'info' as const,
+            },
+          ],
+          sourceMap: astOnly.sourceMap,
+        });
+        this.currentSnapshot = provisional;
+      }
+    }
+
+    const buildPromise = (async (): Promise<DeliverySnapshot> => {
+      const builtSnapshot = prebuiltSyncSnapshot
+        ? (await Promise.resolve(), prebuiltSyncSnapshot)
+        : await this.snapshotBuilder(
+            markdown,
+            currentTargetId,
+            this.assetStore,
+            snapshotOptions
+          );
 
       if (this.disposed) {
         return builtSnapshot;

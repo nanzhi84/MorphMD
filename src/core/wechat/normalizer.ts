@@ -59,28 +59,26 @@ function deleteNestNode({ root, isNeedDelete = false, isTest = false }: { root: 
   const clearTempMarkers = (node: any) => {
     if (!node) return;
     delete node.isNeedEmpty;
-    delete node.level;
     const children = getElementChildren(node);
     for (let i = 0; i < children.length; i++) clearTempMarkers(children[i]);
   };
-  clearTempMarkers(root);
 
-  const depth1 = (node: any) => {
+  const depth1 = (node: any, currentLevel: number) => {
     if (node === null) return;
     if (node.children) {
-      node.level = node.parentNode && node.parentNode.level ? node.parentNode.level + 1 : 1;
-      if (node.attrs) node.attrs['data-nest-level'] = String(node.level);
-      if (typeof node.setAttribute === 'function') node.setAttribute('data-nest-level', String(node.level));
-      if (node.level >= MAX_STYLE_LEVEL) {
+      if (currentLevel >= MAX_STYLE_LEVEL) {
         hasNestedNode.push(node);
         return;
       }
     }
     const children = getElementChildren(node);
-    for (let i = 0; i < children.length; i++) depth1(children[i]);
+    for (let i = 0; i < children.length; i++) depth1(children[i], currentLevel + 1);
   };
-  root.level = 0;
-  depth1(root);
+  depth1(root, 1);
+
+  if (hasNestedNode.length === 0) {
+    return isTest ? willBeDeletedNodes : undefined;
+  }
 
   if (hasNestedNode.length > 0 && (isNeedDelete || isTest)) {
     hasNestedNode.forEach(item => {
@@ -242,29 +240,6 @@ function hasDirectVisibleText(el: Element): boolean {
   return false;
 }
 
-function isInsideSvgContext(el: Element): boolean {
-  let curr: Element | null = el;
-  while (curr) {
-    const tag = curr.tagName.toLowerCase();
-    if (tag === 'svg' || curr.getAttribute('data-mode') === 'svg') {
-      return true;
-    }
-    curr = curr.parentElement;
-  }
-  return false;
-}
-
-function isInsideKatexLayout(el: Element): boolean {
-  let curr: Element | null = el;
-  while (curr) {
-    if (curr.classList && (curr.classList.contains('katex') || curr.classList.contains('katex-html') || curr.classList.contains('katex-mathml'))) {
-      return true;
-    }
-    curr = curr.parentElement;
-  }
-  return false;
-}
-
 function isOverlappingLineHeight(lhRaw: string, fontSizePx: number): boolean {
   const lh = lhRaw.trim();
   if (!lh || /^normal$/i.test(lh)) return false;
@@ -367,19 +342,30 @@ function computeContrastRatio(rgb1: [number, number, number], rgb2: [number, num
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-function findEffectiveBgRgb(el: Element, rootContainer: Element): [number, number, number] | null {
-  let curr: Element | null = el;
-  while (curr) {
-    const s = (curr as HTMLElement).style;
-    if (s) {
-      const bgColor = s.getPropertyValue('background-color') || s.getPropertyValue('background');
-      const parsed = parseColorRgb(bgColor);
-      if (parsed) return parsed;
-    }
-    if (curr === rootContainer) break;
-    curr = curr.parentElement;
+function findEffectiveBgRgb(
+  el: Element,
+  rootContainer: Element,
+  bgCache?: WeakMap<Element, [number, number, number] | null>
+): [number, number, number] | null {
+  if (bgCache?.has(el)) {
+    return bgCache.get(el)!;
   }
-  return null;
+  const s = (el as HTMLElement).style;
+  if (s) {
+    const bgColor = s.getPropertyValue('background-color') || s.getPropertyValue('background');
+    const parsed = parseColorRgb(bgColor);
+    if (parsed) {
+      bgCache?.set(el, parsed);
+      return parsed;
+    }
+  }
+  if (el === rootContainer || !el.parentElement) {
+    bgCache?.set(el, null);
+    return null;
+  }
+  const parentBg = findEffectiveBgRgb(el.parentElement, rootContainer, bgCache);
+  bgCache?.set(el, parentBg);
+  return parentBg;
 }
 
 /**
@@ -407,10 +393,14 @@ export function dedupeWeChatNesting(rootContainer: Element, diagnostics?: Diagno
     });
   }
 
-  rootContainer.removeAttribute('data-nest-level');
-  rootContainer.querySelectorAll('[data-nest-level]').forEach((el) => {
-    el.removeAttribute('data-nest-level');
-  });
+  if (rootContainer.hasAttribute('data-nest-level')) {
+    rootContainer.removeAttribute('data-nest-level');
+  }
+  if (rootContainer.querySelector('[data-nest-level]')) {
+    rootContainer.querySelectorAll('[data-nest-level]').forEach((el) => {
+      el.removeAttribute('data-nest-level');
+    });
+  }
 
   return removedCount;
 }
@@ -456,8 +446,7 @@ export function normalizeWeChatStructureAndStyles(
   });
 
   // 2.5 Structure Rule #2.4: redundant-node (> 20 children with > 15 empty children)
-  const containersForRedundantCheck = [rootContainer, ...Array.from(rootContainer.querySelectorAll('*'))];
-  for (const container of containersForRedundantCheck) {
+  const checkRedundantChildren = (container: Element) => {
     if (container.children.length > 20) {
       const children = Array.from(container.children);
       const emptyChildren = children.filter((child) => {
@@ -479,60 +468,154 @@ export function normalizeWeChatStructureAndStyles(
         });
       }
     }
-  }
+    for (let i = 0; i < container.children.length; i++) {
+      const child = container.children[i];
+      if (child.children.length > 0) {
+        checkRedundantChildren(child);
+      }
+    }
+  };
+  checkRedundantChildren(rootContainer);
 
   // 3. Dark Mode Rule #4.5.1: data-no-dark whitelist attribute
-  const allElements = [rootContainer, ...Array.from(rootContainer.querySelectorAll('*'))];
-  for (const el of allElements) {
-    if (el.hasAttribute('data-no-dark')) {
-      el.removeAttribute('data-no-dark');
+  if (rootContainer.hasAttribute('data-no-dark')) {
+    rootContainer.removeAttribute('data-no-dark');
+    diagnostics.push({
+      code: 'structure/wechat-darkmode-whitelist',
+      message: 'Removed data-no-dark attribute to avoid WeChat Dark Mode whitelist warning (#4.5.1).',
+      severity: 'warning',
+      targetId: 'wechat',
+    });
+  }
+  rootContainer.querySelectorAll('[data-no-dark]').forEach((el) => {
+    el.removeAttribute('data-no-dark');
+    diagnostics.push({
+      code: 'structure/wechat-darkmode-whitelist',
+      message: 'Removed data-no-dark attribute to avoid WeChat Dark Mode whitelist warning (#4.5.1).',
+      severity: 'warning',
+      targetId: 'wechat',
+    });
+  });
+
+  // #1.8 <pre> horizontal scroll safeguard
+  if (canSetProp('overflow-x')) {
+    rootContainer.querySelectorAll<HTMLElement>('pre').forEach((preEl) => {
+      if (hasVisibleText(preEl)) {
+        const style = preEl.style;
+        const ox = getEffectiveOverflowAxis(style, 'x');
+        const ws = style.getPropertyValue('white-space').trim().toLowerCase();
+        if (ox !== 'auto' && ox !== 'scroll' && ws !== 'pre-wrap' && ws !== 'normal') {
+          style.setProperty('overflow-x', 'auto');
+        }
+      }
+    });
+  }
+
+  // #1.7 SVG animate/animateTransform/animateMotion begin="touchstart" safeguard
+  rootContainer.querySelectorAll('animate[begin], animateTransform[begin], animateMotion[begin]').forEach((el) => {
+    const tag = el.tagName.toLowerCase();
+    const beginAttr = el.getAttribute('begin');
+    if (beginAttr && /\btouchstart\b/i.test(beginAttr) && !/\bclick\b/i.test(beginAttr)) {
+      const normalizedBegin = `${beginAttr.trim().replace(/;+\s*$/, '')}; click`;
+      el.setAttribute('begin', normalizedBegin);
       diagnostics.push({
-        code: 'structure/wechat-darkmode-whitelist',
-        message: 'Removed data-no-dark attribute to avoid WeChat Dark Mode whitelist warning (#4.5.1).',
+        code: 'structure/wechat-animate-begin-click',
+        message: `Appended click trigger to SVG <${tag} begin="${beginAttr}"> for WeChat PC compatibility (#1.7 begin).`,
         severity: 'warning',
         targetId: 'wechat',
       });
     }
-  }
+  });
 
-  // 4. CSS & Layout Rules (#1.1 - #1.8, #4.1.1, #4.1.2)
-  for (const el of allElements) {
+  const bgRgbCache = new WeakMap<Element, [number, number, number] | null>();
+  const contrastSafeCache = new Map<string, boolean>();
+  const katexOrSvgCache = new WeakMap<Element, boolean>();
+  const isInsideKatexOrSvgCached = (el: Element): boolean => {
+    if (katexOrSvgCache.has(el)) return katexOrSvgCache.get(el)!;
+    const tag = el.tagName.toLowerCase();
+    const cl = el.classList;
+    if (
+      tag === 'svg' ||
+      el.getAttribute('data-mode') === 'svg' ||
+      (cl && (cl.contains('katex') || cl.contains('katex-html') || cl.contains('katex-mathml')))
+    ) {
+      katexOrSvgCache.set(el, true);
+      return true;
+    }
+    const parentRes = el.parentElement && el !== rootContainer ? isInsideKatexOrSvgCached(el.parentElement) : false;
+    katexOrSvgCache.set(el, parentRes);
+    return parentRes;
+  };
+
+  // 4. CSS & Layout Rules (#1.1 - #1.6, #3, #4.1.1, #4.1.2) across styled elements only
+  const verifiedSafeElementStyles = new Set<string>();
+  const styledElements = [rootContainer, ...Array.from(rootContainer.querySelectorAll<HTMLElement>('[style]'))];
+  for (const el of styledElements) {
+    if (!el.isConnected) continue;
+    const rawStyleAttr = el.getAttribute('style');
+    if (!rawStyleAttr) continue;
+
+    // Fast-path for simple hex color spans (e.g. Shiki syntax tokens: style="color:#24292E")
+    if (
+      rawStyleAttr.charCodeAt(0) === 99 /* 'c' */ &&
+      /^color:\s*#[0-9a-fA-F]{3,8}\s*;?$/.test(rawStyleAttr) &&
+      !el.hasAttribute('data-ignore-dm')
+    ) {
+      const bgRgb = findEffectiveBgRgb(el, rootContainer, bgRgbCache);
+      if (bgRgb) {
+        const colorHex = rawStyleAttr.slice(6).replace(';', '').trim();
+        const cacheKey = `${colorHex}|${bgRgb[0]},${bgRgb[1]},${bgRgb[2]}`;
+        let isLowContrast = contrastSafeCache.get(cacheKey);
+        if (isLowContrast === undefined) {
+          const textRgb = parseColorRgb(colorHex);
+          isLowContrast = Boolean(textRgb && computeContrastRatio(textRgb, bgRgb) < 1.5);
+          contrastSafeCache.set(cacheKey, isLowContrast);
+        }
+        if (isLowContrast && hasDirectVisibleText(el)) {
+          el.removeAttribute('style');
+          diagnostics.push({
+            code: 'style/wechat-low-contrast',
+            message: 'Removed low-contrast text color (contrast < 1.5) for WeChat Dark Mode readability (#4.1.1).',
+            severity: 'warning',
+            targetId: 'wechat',
+            property: 'color',
+          });
+        }
+      }
+      continue;
+    }
+
     const htmlEl = el as HTMLElement;
     const tag = el.tagName.toLowerCase();
+    const rawStyleLower = rawStyleAttr.toLowerCase();
+    const ignoreDmAttr = el.getAttribute('data-ignore-dm');
+    const canCacheSafeStyle =
+      el !== rootContainer &&
+      !ignoreDmAttr &&
+      !el.hasAttribute('data-ignore-width') &&
+      !rawStyleLower.includes('height') &&
+      !rawStyleLower.includes('gradient') &&
+      !isInsideKatexOrSvgCached(el);
+    const effectiveBgForKey =
+      canCacheSafeStyle && rawStyleLower.includes('color')
+        ? findEffectiveBgRgb(el, rootContainer, bgRgbCache)
+        : null;
+    const safeStyleKey = canCacheSafeStyle
+      ? `${tag}|${rawStyleAttr}|${effectiveBgForKey ? `${effectiveBgForKey[0]},${effectiveBgForKey[1]},${effectiveBgForKey[2]}` : ''}`
+      : null;
+    if (safeStyleKey !== null && verifiedSafeElementStyles.has(safeStyleKey)) {
+      continue;
+    }
+
     const style = htmlEl.style;
-
-    // #1.8 <pre> horizontal scroll safeguard
-    if (tag === 'pre' && hasVisibleText(el) && canSetProp('overflow-x')) {
-      const ox = getEffectiveOverflowAxis(style, 'x');
-      const ws = style.getPropertyValue('white-space').trim().toLowerCase();
-      if (ox !== 'auto' && ox !== 'scroll' && ws !== 'pre-wrap' && ws !== 'normal') {
-        style.setProperty('overflow-x', 'auto');
-      }
-    }
-
-    // #1.7 SVG animate/animateTransform/animateMotion begin="touchstart" safeguard
-    if (tag === 'animate' || tag === 'animatetransform' || tag === 'animatemotion') {
-      const beginAttr = el.getAttribute('begin');
-      if (beginAttr && /\btouchstart\b/i.test(beginAttr) && !/\bclick\b/i.test(beginAttr)) {
-        const normalizedBegin = `${beginAttr.trim().replace(/;+\s*$/, '')}; click`;
-        el.setAttribute('begin', normalizedBegin);
-        diagnostics.push({
-          code: 'structure/wechat-animate-begin-click',
-          message: `Appended click trigger to SVG <${tag} begin="${beginAttr}"> for WeChat PC compatibility (#1.7 begin).`,
-          severity: 'warning',
-          targetId: 'wechat',
-        });
-      }
-    }
-
-    if (!el.getAttribute('style')) continue;
+    let styleMutated = false;
 
     // #1.1 img opacity: 0
-    if (tag === 'img') {
+    if (tag === 'img' && rawStyleLower.includes('opacity')) {
       const op = style.getPropertyValue('opacity').trim();
-      const rawStyle = el.getAttribute('style') || '';
-      if ((op !== '' && (/^0(?:\.0+)?$/.test(op) || parseFloat(op) === 0)) || /opacity\s*:\s*0\b/i.test(rawStyle)) {
+      if ((op !== '' && (/^0(?:\.0+)?$/.test(op) || parseFloat(op) === 0)) || /opacity\s*:\s*0\b/i.test(rawStyleAttr)) {
         style.removeProperty('opacity');
+        styleMutated = true;
         diagnostics.push({
           code: 'style/wechat-img-opacity-zero',
           message: 'Removed opacity: 0 from <img> to comply with WeChat spec (#1.1 opacity).',
@@ -544,138 +627,160 @@ export function normalizeWeChatStructureAndStyles(
     }
 
     // #1.2 caret-color: transparent / rgba(0,0,0,0)
-    const caret = style.getPropertyValue('caret-color').trim();
-    if (caret && (/^transparent$/i.test(caret) || /rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/i.test(caret.replace(/\s+/g, '')))) {
-      style.removeProperty('caret-color');
-      diagnostics.push({
-        code: 'style/wechat-transparent-caret',
-        message: 'Removed transparent caret-color to comply with WeChat spec (#1.2 caret-color).',
-        severity: 'warning',
-        targetId: 'wechat',
-        property: 'caret-color',
-      });
+    if (rawStyleLower.includes('caret-color')) {
+      const caret = style.getPropertyValue('caret-color').trim();
+      if (caret && (/^transparent$/i.test(caret) || /rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/i.test(caret.replace(/\s+/g, '')))) {
+        style.removeProperty('caret-color');
+        styleMutated = true;
+        diagnostics.push({
+          code: 'style/wechat-transparent-caret',
+          message: 'Removed transparent caret-color to comply with WeChat spec (#1.2 caret-color).',
+          severity: 'warning',
+          targetId: 'wechat',
+          property: 'caret-color',
+        });
+      }
     }
 
     // #1.6 text-align: start | end
-    const textAlign = style.getPropertyValue('text-align').trim().toLowerCase();
-    if (textAlign === 'start' || textAlign === 'end') {
-      const normalized = textAlign === 'start' ? 'left' : 'right';
-      if (canSetProp('text-align')) {
-        style.setProperty('text-align', normalized);
-      } else {
-        style.removeProperty('text-align');
+    if (rawStyleLower.includes('text-align')) {
+      const textAlign = style.getPropertyValue('text-align').trim().toLowerCase();
+      if (textAlign === 'start' || textAlign === 'end') {
+        const normalized = textAlign === 'start' ? 'left' : 'right';
+        if (canSetProp('text-align')) {
+          style.setProperty('text-align', normalized);
+        } else {
+          style.removeProperty('text-align');
+        }
+        styleMutated = true;
+        diagnostics.push({
+          code: 'style/wechat-text-align-normalized',
+          message: `Normalized text-align: ${textAlign} to ${normalized} for WeChat cross-device compatibility (#1.6 text-align).`,
+          severity: 'warning',
+          targetId: 'wechat',
+          property: 'text-align',
+        });
       }
-      diagnostics.push({
-        code: 'style/wechat-text-align-normalized',
-        message: `Normalized text-align: ${textAlign} to ${normalized} for WeChat cross-device compatibility (#1.6 text-align).`,
-        severity: 'warning',
-        targetId: 'wechat',
-        property: 'text-align',
-      });
     }
 
     // #3 font-family: ensure WeChat-compatible system font prefix
-    const ff = style.getPropertyValue('font-family').trim();
-    if (ff) {
-      const normalizedFf = ff.replace(/["']/g, '').replace(/\s+/g, ' ').trim();
-      const wechatFontPrefix = 'mp-quote, PingFang SC, system-ui, -apple-system';
-      if (!normalizedFf.startsWith(wechatFontPrefix)) {
-        if (canSetProp('font-family')) {
-          style.setProperty('font-family', `"mp-quote", PingFang SC, system-ui, -apple-system, ${ff}`);
-        } else {
-          style.removeProperty('font-family');
-        }
-        diagnostics.push({
-          code: 'style/wechat-font-family-normalized',
-          message: `Normalized font-family (${ff}) to WeChat-compatible system font stack (#3 font-family).`,
-          severity: 'warning',
-          targetId: 'wechat',
-          property: 'font-family',
-        });
-      }
-    }
-
-    // #1.3 line-height overlap
-    const lh = style.getPropertyValue('line-height').trim();
-    if (lh && tag !== 'svg' && !isInsideSvgContext(el) && !isInsideKatexLayout(el) && hasVisibleText(el)) {
-      const fsRaw = style.getPropertyValue('font-size').trim();
-      const fontSizePx = fsRaw && fsRaw.endsWith('px') ? (parseFloat(fsRaw) || 16) : 16;
-      if (isOverlappingLineHeight(lh, fontSizePx)) {
-        if (el === rootContainer && canSetProp('line-height')) {
-          style.setProperty('line-height', '1.75');
-        } else {
-          style.removeProperty('line-height');
-        }
-        diagnostics.push({
-          code: 'style/wechat-line-height-overlap',
-          message: `Removed overlapping line-height (${lh}) on text element (#1.3 line-height).`,
-          severity: 'warning',
-          targetId: 'wechat',
-          property: 'line-height',
-        });
-      }
-    }
-
-    // #1.4 width & horizontal overflow on non-img/non-svg elements (unless data-ignore-width)
-    const ignoresWidth = typeof el.closest === 'function'
-      ? Boolean(el.closest('[data-ignore-width]'))
-      : el.hasAttribute('data-ignore-width');
-
-    if (!ignoresWidth && tag !== 'img' && tag !== 'svg' && !isInsideSvgContext(el) && !isInsideKatexLayout(el)) {
-      const w = style.getPropertyValue('width').trim();
-      if (w && isUnsafeFixedWidth(w)) {
-        style.removeProperty('width');
-        diagnostics.push({
-          code: 'style/wechat-fixed-width',
-          message: `Removed fixed width (${w}) on <${tag}> to prevent multi-screen width/centering variance (#1.4 width).`,
-          severity: 'warning',
-          targetId: 'wechat',
-          property: 'width',
-        });
-      }
-
-      for (const mProp of ['margin-left', 'margin-right'] as const) {
-        const mVal = style.getPropertyValue(mProp).trim();
-        if (mVal && isExcessiveHorizontalMargin(mVal)) {
-          style.removeProperty(mProp);
+    if (rawStyleLower.includes('font-family')) {
+      const ff = style.getPropertyValue('font-family').trim();
+      if (ff) {
+        const normalizedFf = ff.replace(/["']/g, '').replace(/\s+/g, ' ').trim();
+        const wechatFontPrefix = 'mp-quote, PingFang SC, system-ui, -apple-system';
+        if (!normalizedFf.startsWith(wechatFontPrefix)) {
+          if (canSetProp('font-family')) {
+            style.setProperty('font-family', `"mp-quote", PingFang SC, system-ui, -apple-system, ${ff}`);
+          } else {
+            style.removeProperty('font-family');
+          }
+          styleMutated = true;
           diagnostics.push({
-            code: 'style/wechat-overflow-margin',
-            message: `Removed excessive ${mProp} (${mVal}) to prevent mobile horizontal overflow (#1.4.2 width).`,
+            code: 'style/wechat-font-family-normalized',
+            message: `Normalized font-family (${ff}) to WeChat-compatible system font stack (#3 font-family).`,
             severity: 'warning',
             targetId: 'wechat',
-            property: mProp,
+            property: 'font-family',
           });
         }
       }
     }
 
+    // #1.3 line-height overlap
+    if (rawStyleLower.includes('line-height') && tag !== 'svg' && !isInsideKatexOrSvgCached(el)) {
+      const lh = style.getPropertyValue('line-height').trim();
+      if (lh) {
+        const fsRaw = style.getPropertyValue('font-size').trim();
+        const fontSizePx = fsRaw && fsRaw.endsWith('px') ? (parseFloat(fsRaw) || 16) : 16;
+        if (isOverlappingLineHeight(lh, fontSizePx) && hasVisibleText(el)) {
+          if (el === rootContainer && canSetProp('line-height')) {
+            style.setProperty('line-height', '1.75');
+          } else {
+            style.removeProperty('line-height');
+          }
+          styleMutated = true;
+          diagnostics.push({
+            code: 'style/wechat-line-height-overlap',
+            message: `Removed overlapping line-height (${lh}) on text element (#1.3 line-height).`,
+            severity: 'warning',
+            targetId: 'wechat',
+            property: 'line-height',
+          });
+        }
+      }
+    }
+
+    // #1.4 width & horizontal overflow on non-img/non-svg elements (unless data-ignore-width)
+    if ((rawStyleLower.includes('width') || rawStyleLower.includes('margin')) && tag !== 'img' && tag !== 'svg' && !isInsideKatexOrSvgCached(el)) {
+      const w = style.getPropertyValue('width').trim();
+      const ml = style.getPropertyValue('margin-left').trim();
+      const mr = style.getPropertyValue('margin-right').trim();
+      if (w || ml || mr) {
+        const ignoresWidth = typeof el.closest === 'function'
+          ? Boolean(el.closest('[data-ignore-width]'))
+          : el.hasAttribute('data-ignore-width');
+
+        if (!ignoresWidth) {
+          if (w && isUnsafeFixedWidth(w)) {
+            style.removeProperty('width');
+            styleMutated = true;
+            diagnostics.push({
+              code: 'style/wechat-fixed-width',
+              message: `Removed fixed width (${w}) on <${tag}> to prevent multi-screen width/centering variance (#1.4 width).`,
+              severity: 'warning',
+              targetId: 'wechat',
+              property: 'width',
+            });
+          }
+
+          for (const [mProp, mVal] of [['margin-left', ml], ['margin-right', mr]] as const) {
+            if (mVal && isExcessiveHorizontalMargin(mVal)) {
+              style.removeProperty(mProp);
+              styleMutated = true;
+              diagnostics.push({
+                code: 'style/wechat-overflow-margin',
+                message: `Removed excessive ${mProp} (${mVal}) to prevent mobile horizontal overflow (#1.4.2 width).`,
+                severity: 'warning',
+                targetId: 'wechat',
+                property: mProp,
+              });
+            }
+          }
+        }
+      }
+    }
+
     // #1.5 height: 0 and fixed height overflow on text/content containers
-    const h = style.getPropertyValue('height').trim();
-    if (h && !/^auto$/i.test(h) && tag !== 'img' && tag !== 'svg' && !isInsideSvgContext(el) && !isInsideKatexLayout(el)) {
-      const isZeroHeight = /^0(?:px|em|rem|%|pt)?$/i.test(h);
-      const overflowY = getEffectiveOverflowAxis(style, 'y');
-      const canScrollY = overflowY === 'auto' || overflowY === 'scroll';
-      if ((isZeroHeight && hasVisibleText(el)) || (!isZeroHeight && !canScrollY && (hasVisibleText(el) || el.children.length > 0))) {
-        style.removeProperty('height');
-        diagnostics.push({
-          code: 'style/wechat-unsafe-height',
-          message: `Removed fixed height (${h}) on <${tag}> to prevent text clipping/hiding on mobile (#1.5 height).`,
-          severity: 'warning',
-          targetId: 'wechat',
-          property: 'height',
-        });
+    if (rawStyleLower.includes('height') && tag !== 'img' && tag !== 'svg' && !isInsideKatexOrSvgCached(el)) {
+      const h = style.getPropertyValue('height').trim();
+      if (h && !/^auto$/i.test(h)) {
+        const isZeroHeight = /^0(?:px|em|rem|%|pt)?$/i.test(h);
+        const overflowY = getEffectiveOverflowAxis(style, 'y');
+        const canScrollY = overflowY === 'auto' || overflowY === 'scroll';
+        if ((isZeroHeight && hasVisibleText(el)) || (!isZeroHeight && !canScrollY && (el.children.length > 0 || hasVisibleText(el)))) {
+          style.removeProperty('height');
+          styleMutated = true;
+          diagnostics.push({
+            code: 'style/wechat-unsafe-height',
+            message: `Removed fixed height (${h}) on <${tag}> to prevent text clipping/hiding on mobile (#1.5 height).`,
+            severity: 'warning',
+            targetId: 'wechat',
+            property: 'height',
+          });
+        }
       }
     }
 
     // #4.1.2 Dark Mode text background gradient
-    const ignoreDm = (el.getAttribute('data-ignore-dm') || '').split(/\s+/);
-    if (!ignoreDm.includes('text-bg-gradient') && hasVisibleText(el)) {
+    const ignoreDm = ignoreDmAttr ? ignoreDmAttr.split(/\s+/) : [];
+    if (!ignoreDm.includes('text-bg-gradient') && rawStyleLower.includes('gradient')) {
       const bgImg = style.getPropertyValue('background-image').trim();
       const bg = style.getPropertyValue('background').trim();
-      const rawStyle = el.getAttribute('style') || '';
-      if (/gradient\s*\(/i.test(bgImg) || /gradient\s*\(/i.test(bg) || /gradient\s*\(/i.test(rawStyle)) {
+      if ((/gradient\s*\(/i.test(bgImg) || /gradient\s*\(/i.test(bg) || /gradient\s*\(/i.test(rawStyleAttr)) && hasVisibleText(el)) {
         style.removeProperty('background-image');
         style.removeProperty('background');
+        styleMutated = true;
         diagnostics.push({
           code: 'style/wechat-text-gradient-bg',
           message: 'Removed gradient background on text container for WeChat Dark Mode compliance (#4.1.2).',
@@ -687,23 +792,43 @@ export function normalizeWeChatStructureAndStyles(
     }
 
     // #4.1.1 Dark Mode low contrast text vs background
-    if (!ignoreDm.includes('low-contrast') && hasDirectVisibleText(el)) {
-      const textRgb = parseColorRgb(style.getPropertyValue('color'));
-      const bgRgb = findEffectiveBgRgb(el, rootContainer);
-      if (textRgb && bgRgb && computeContrastRatio(textRgb, bgRgb) < 1.5) {
-        style.removeProperty('color');
-        diagnostics.push({
-          code: 'style/wechat-low-contrast',
-          message: 'Removed low-contrast text color (contrast < 1.5) for WeChat Dark Mode readability (#4.1.1).',
-          severity: 'warning',
-          targetId: 'wechat',
-          property: 'color',
-        });
+    if (!ignoreDm.includes('low-contrast') && rawStyleLower.includes('color') && hasDirectVisibleText(el)) {
+      const isSimpleHexColor = /^color:\s*(#[0-9a-fA-F]{3,8})\s*;?$/.exec(rawStyleAttr);
+      const colorProp = isSimpleHexColor ? isSimpleHexColor[1] : style.getPropertyValue('color');
+      if (colorProp) {
+        const bgRgb = effectiveBgForKey ?? findEffectiveBgRgb(el, rootContainer, bgRgbCache);
+        if (bgRgb) {
+          const cacheKey = `${colorProp}|${bgRgb[0]},${bgRgb[1]},${bgRgb[2]}`;
+          let isLowContrast = contrastSafeCache.get(cacheKey);
+          if (isLowContrast === undefined) {
+            const textRgb = parseColorRgb(colorProp);
+            isLowContrast = Boolean(textRgb && computeContrastRatio(textRgb, bgRgb) < 1.5);
+            contrastSafeCache.set(cacheKey, isLowContrast);
+          }
+          if (isLowContrast) {
+            style.removeProperty('color');
+            styleMutated = true;
+            diagnostics.push({
+              code: 'style/wechat-low-contrast',
+              message: 'Removed low-contrast text color (contrast < 1.5) for WeChat Dark Mode readability (#4.1.1).',
+              severity: 'warning',
+              targetId: 'wechat',
+              property: 'color',
+            });
+          }
+        }
       }
     }
 
-    if (style.length === 0) {
+    if (styleMutated && style.length === 0) {
       el.removeAttribute('style');
+    } else if (
+      safeStyleKey !== null &&
+      !styleMutated &&
+      (!rawStyleLower.includes('line-height') || hasVisibleText(el)) &&
+      (!rawStyleLower.includes('color') || hasDirectVisibleText(el))
+    ) {
+      verifiedSafeElementStyles.add(safeStyleKey);
     }
   }
 

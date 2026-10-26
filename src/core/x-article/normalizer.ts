@@ -1,4 +1,4 @@
-import { deflateSync } from 'node:zlib';
+import { encodeRgbPngBytes, uint8ToBase64 } from '../dom/binary';
 import type { AdapterCapabilities, DiagnosticItem } from '../snapshot/types';
 
 function hashContent32(input: string): number {
@@ -10,62 +10,69 @@ function hashContent32(input: string): number {
   return h >>> 0;
 }
 
+const rasterPngDataUrlCache = new Map<string, string>();
+const MAX_RASTER_PNG_CACHE = 4096;
+
 function createRasterPngDataUrl(lines: string[], width = 680): string {
   const normalizedLines = lines.length > 0 ? lines : ['raster'];
   const fullText = normalizedLines.join('\n');
+  const w = Math.max(96, Math.min(1200, Math.round(width)));
+  const cacheKey = `${w}:${fullText}`;
+  const cached = rasterPngDataUrlCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   const contentHash = hashContent32(fullText);
 
   const rowHeight = 28;
   const padding = 16;
-  const w = Math.max(96, Math.min(1200, Math.round(width)));
   const h = Math.max(56, Math.min(1200, normalizedLines.length * rowHeight + padding * 2));
 
-  function chunk(type: string, data: Buffer): Buffer {
-    const payload = Buffer.concat([Buffer.from(type), data]);
-    let crc = 0xffffffff;
-    for (const byte of payload) {
-      crc ^= byte;
-      for (let i = 0; i < 8; i++) {
-        crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  const rowStride = w * 3 + 1;
+  const rows = new Uint8Array(rowStride * h);
+
+  const borderRow = new Uint8Array(rowStride);
+  const accentRow = new Uint8Array(rowStride);
+  const bgRow = new Uint8Array(rowStride);
+
+  for (let x = 0; x < w; x++) {
+    const px = 1 + x * 3;
+    borderRow[px] = 207;
+    borderRow[px + 1] = 217;
+    borderRow[px + 2] = 222;
+
+    if (x === 0 || x === w - 1) {
+      accentRow[px] = 207;
+      accentRow[px + 1] = 217;
+      accentRow[px + 2] = 222;
+      bgRow[px] = 207;
+      bgRow[px + 1] = 217;
+      bgRow[px + 2] = 222;
+    } else {
+      bgRow[px] = 247;
+      bgRow[px + 1] = 249;
+      bgRow[px + 2] = 249;
+      if (x >= padding && x < padding + 4) {
+        accentRow[px] = 29;
+        accentRow[px + 1] = 155;
+        accentRow[px + 2] = 240;
+      } else {
+        accentRow[px] = 247;
+        accentRow[px + 1] = 249;
+        accentRow[px + 2] = 249;
       }
     }
-    const size = Buffer.alloc(4);
-    size.writeUInt32BE(data.length);
-    const checksum = Buffer.alloc(4);
-    checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
-    return Buffer.concat([size, payload, checksum]);
   }
 
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(w, 0);
-  header.writeUInt32BE(h, 4);
-  header[8] = 8; // bit depth
-  header[9] = 2; // RGB
-
-  const rowStride = w * 3 + 1;
-  const rows = Buffer.alloc(rowStride * h);
-
-  // Fill background, border, and left accent bar
   for (let y = 0; y < h; y++) {
     const rowStart = y * rowStride;
-    rows[rowStart] = 0; // filter None
-    const isBorder = y === 0 || y === h - 1;
-    const isAccentBar = !isBorder && y >= padding && y < h - padding;
-    for (let x = 0; x < w; x++) {
-      const px = rowStart + 1 + x * 3;
-      if (isBorder || x === 0 || x === w - 1) {
-        rows[px] = 207;
-        rows[px + 1] = 217;
-        rows[px + 2] = 222;
-      } else if (isAccentBar && x >= padding && x < padding + 4) {
-        rows[px] = 29;
-        rows[px + 1] = 155;
-        rows[px + 2] = 240;
-      } else {
-        rows[px] = 247;
-        rows[px + 1] = 249;
-        rows[px + 2] = 249;
-      }
+    if (y === 0 || y === h - 1) {
+      rows.set(borderRow, rowStart);
+    } else if (y >= padding && y < h - padding) {
+      rows.set(accentRow, rowStart);
+    } else {
+      rows.set(bgRow, rowStart);
     }
   }
 
@@ -126,13 +133,16 @@ function createRasterPngDataUrl(lines: string[], width = 680): string {
     }
   }
 
-  const pngBuffer = Buffer.concat([
-    Buffer.from('89504e470d0a1a0a', 'hex'),
-    chunk('IHDR', header),
-    chunk('IDAT', deflateSync(rows)),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
-  return `data:image/png;base64,${pngBuffer.toString('base64')}`;
+  const pngBytes = encodeRgbPngBytes(w, h, rows);
+  const dataUrl = `data:image/png;base64,${uint8ToBase64(pngBytes)}`;
+  if (rasterPngDataUrlCache.size >= MAX_RASTER_PNG_CACHE) {
+    const oldestKey = rasterPngDataUrlCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      rasterPngDataUrlCache.delete(oldestKey);
+    }
+  }
+  rasterPngDataUrlCache.set(cacheKey, dataUrl);
+  return dataUrl;
 }
 
 function extractTableSummaryLines(table: Element): string[] {

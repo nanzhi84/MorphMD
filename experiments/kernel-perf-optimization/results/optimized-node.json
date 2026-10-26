@@ -1,0 +1,327 @@
+{
+  "environment": "Node.js v24 + JSDOM (Post-Optimization)",
+  "stageBreakdown": {
+    "small (2 sections, ~70 lines)": {
+      "markdownChars": 1436,
+      "markdownLines": 60,
+      "targets": {
+        "wechat": {
+          "coldCache": {
+            "astCompileMs": 68.23,
+            "styleInlineMs": 189.78,
+            "domAssetAndNormalizeMs": 0.4,
+            "htmlSerializeMs": 1.13,
+            "totalMs": 259.54,
+            "endToEndBuildDeliverySnapshotMs": 17.23,
+            "domNodesCount": 245,
+            "htmlBytes": 15579
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 3.57,
+            "styleInlineMs": 11.41,
+            "domAssetAndNormalizeMs": 0.36,
+            "htmlSerializeMs": 0.66,
+            "totalMs": 15.99,
+            "endToEndBuildDeliverySnapshotMs": 15.75,
+            "domNodesCount": 245,
+            "htmlBytes": 15579
+          }
+        },
+        "x-article": {
+          "coldCache": {
+            "astCompileMs": 4.48,
+            "styleInlineMs": 6.87,
+            "domAssetAndNormalizeMs": 8.58,
+            "htmlSerializeMs": 0.33,
+            "totalMs": 20.26,
+            "endToEndBuildDeliverySnapshotMs": 13.83,
+            "domNodesCount": 245,
+            "htmlBytes": 59641
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 2.64,
+            "styleInlineMs": 6.62,
+            "domAssetAndNormalizeMs": 3.96,
+            "htmlSerializeMs": 0.29,
+            "totalMs": 13.51,
+            "endToEndBuildDeliverySnapshotMs": 14.48,
+            "domNodesCount": 245,
+            "htmlBytes": 59641
+          }
+        },
+        "cards": {
+          "coldCache": {
+            "astCompileMs": 4.08,
+            "styleInlineMs": 6.43,
+            "domAssetAndNormalizeMs": 3.73,
+            "htmlSerializeMs": 0.39,
+            "totalMs": 14.64,
+            "endToEndBuildDeliverySnapshotMs": 10.83,
+            "domNodesCount": 245,
+            "htmlBytes": 18635
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 2.08,
+            "styleInlineMs": 5.97,
+            "domAssetAndNormalizeMs": 1.94,
+            "htmlSerializeMs": 0.4,
+            "totalMs": 10.39,
+            "endToEndBuildDeliverySnapshotMs": 11.68,
+            "domNodesCount": 245,
+            "htmlBytes": 18635
+          }
+        }
+      }
+    },
+    "medium (8 sections, ~260 lines)": {
+      "markdownChars": 5474,
+      "markdownLines": 228,
+      "targets": {
+        "wechat": {
+          "coldCache": {
+            "astCompileMs": 11.81,
+            "styleInlineMs": 26.15,
+            "domAssetAndNormalizeMs": 1.39,
+            "htmlSerializeMs": 1.19,
+            "totalMs": 40.54,
+            "endToEndBuildDeliverySnapshotMs": 38.08,
+            "domNodesCount": 929,
+            "htmlBytes": 58186
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 7.07,
+            "styleInlineMs": 24.72,
+            "domAssetAndNormalizeMs": 1.36,
+            "htmlSerializeMs": 1.19,
+            "totalMs": 34.33,
+            "endToEndBuildDeliverySnapshotMs": 41.13,
+            "domNodesCount": 929,
+            "htmlBytes": 58186
+          }
+        },
+        "x-article": {
+          "coldCache": {
+            "astCompileMs": 10.86,
+            "styleInlineMs": 16.21,
+            "domAssetAndNormalizeMs": 17.46,
+            "htmlSerializeMs": 0.72,
+            "totalMs": 45.24,
+            "endToEndBuildDeliverySnapshotMs": 38.47,
+            "domNodesCount": 929,
+            "htmlBytes": 230772
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 6.25,
+            "styleInlineMs": 16.27,
+            "domAssetAndNormalizeMs": 11.9,
+            "htmlSerializeMs": 0.67,
+            "totalMs": 35.09,
+            "endToEndBuildDeliverySnapshotMs": 37.38,
+            "domNodesCount": 929,
+            "htmlBytes": 230772
+          }
+        },
+        "cards": {
+          "coldCache": {
+            "astCompileMs": 10.61,
+            "styleInlineMs": 16.36,
+            "domAssetAndNormalizeMs": 6.04,
+            "htmlSerializeMs": 1.24,
+            "totalMs": 34.25,
+            "endToEndBuildDeliverySnapshotMs": 32.23,
+            "domNodesCount": 929,
+            "htmlBytes": 69099
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 8.45,
+            "styleInlineMs": 16.3,
+            "domAssetAndNormalizeMs": 6,
+            "htmlSerializeMs": 1.06,
+            "totalMs": 31.82,
+            "endToEndBuildDeliverySnapshotMs": 31.67,
+            "domNodesCount": 929,
+            "htmlBytes": 69099
+          }
+        }
+      }
+    },
+    "large (20 sections, ~650 lines)": {
+      "markdownChars": 13737,
+      "markdownLines": 564,
+      "targets": {
+        "wechat": {
+          "coldCache": {
+            "astCompileMs": 22.7,
+            "styleInlineMs": 63.67,
+            "domAssetAndNormalizeMs": 4.16,
+            "htmlSerializeMs": 3.19,
+            "totalMs": 93.72,
+            "endToEndBuildDeliverySnapshotMs": 85.63,
+            "domNodesCount": 2330,
+            "htmlBytes": 144087
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 16.78,
+            "styleInlineMs": 57.77,
+            "domAssetAndNormalizeMs": 4.16,
+            "htmlSerializeMs": 3.23,
+            "totalMs": 81.93,
+            "endToEndBuildDeliverySnapshotMs": 82.58,
+            "domNodesCount": 2330,
+            "htmlBytes": 144087
+          }
+        },
+        "x-article": {
+          "coldCache": {
+            "astCompileMs": 22.38,
+            "styleInlineMs": 41.49,
+            "domAssetAndNormalizeMs": 36.13,
+            "htmlSerializeMs": 1.36,
+            "totalMs": 101.36,
+            "endToEndBuildDeliverySnapshotMs": 95.32,
+            "domNodesCount": 2330,
+            "htmlBytes": 584778
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 16.48,
+            "styleInlineMs": 39.46,
+            "domAssetAndNormalizeMs": 31.01,
+            "htmlSerializeMs": 1.55,
+            "totalMs": 88.51,
+            "endToEndBuildDeliverySnapshotMs": 89.47,
+            "domNodesCount": 2330,
+            "htmlBytes": 584778
+          }
+        },
+        "cards": {
+          "coldCache": {
+            "astCompileMs": 22.18,
+            "styleInlineMs": 39.5,
+            "domAssetAndNormalizeMs": 19.72,
+            "htmlSerializeMs": 5.08,
+            "totalMs": 86.47,
+            "endToEndBuildDeliverySnapshotMs": 84.01,
+            "domNodesCount": 2330,
+            "htmlBytes": 170720
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 14.48,
+            "styleInlineMs": 39.15,
+            "domAssetAndNormalizeMs": 17.66,
+            "htmlSerializeMs": 3.18,
+            "totalMs": 74.47,
+            "endToEndBuildDeliverySnapshotMs": 73.63,
+            "domNodesCount": 2330,
+            "htmlBytes": 170720
+          }
+        }
+      }
+    },
+    "xlarge (185 sections, ~5200 lines)": {
+      "markdownChars": 129049,
+      "markdownLines": 5184,
+      "targets": {
+        "wechat": {
+          "coldCache": {
+            "astCompileMs": 207.37,
+            "styleInlineMs": 1031.98,
+            "domAssetAndNormalizeMs": 170.33,
+            "htmlSerializeMs": 42.29,
+            "totalMs": 1451.97,
+            "endToEndBuildDeliverySnapshotMs": 1499.86,
+            "domNodesCount": 21635,
+            "htmlBytes": 1332877
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 174.76,
+            "styleInlineMs": 1042.7,
+            "domAssetAndNormalizeMs": 166.93,
+            "htmlSerializeMs": 41.15,
+            "totalMs": 1425.55,
+            "endToEndBuildDeliverySnapshotMs": 1414.6,
+            "domNodesCount": 21635,
+            "htmlBytes": 1332877
+          }
+        },
+        "x-article": {
+          "coldCache": {
+            "astCompileMs": 206.94,
+            "styleInlineMs": 488.2,
+            "domAssetAndNormalizeMs": 579.11,
+            "htmlSerializeMs": 24.26,
+            "totalMs": 1298.5,
+            "endToEndBuildDeliverySnapshotMs": 1226.39,
+            "domNodesCount": 21635,
+            "htmlBytes": 5563567
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 156.91,
+            "styleInlineMs": 545.08,
+            "domAssetAndNormalizeMs": 563.68,
+            "htmlSerializeMs": 28.77,
+            "totalMs": 1294.44,
+            "endToEndBuildDeliverySnapshotMs": 1236.43,
+            "domNodesCount": 21635,
+            "htmlBytes": 5563567
+          }
+        },
+        "cards": {
+          "coldCache": {
+            "astCompileMs": 206.46,
+            "styleInlineMs": 488.27,
+            "domAssetAndNormalizeMs": 505.23,
+            "htmlSerializeMs": 51.24,
+            "totalMs": 1251.2,
+            "endToEndBuildDeliverySnapshotMs": 1230.36,
+            "domNodesCount": 21635,
+            "htmlBytes": 1552364
+          },
+          "warmCacheIncrementalEdit": {
+            "astCompileMs": 160.17,
+            "styleInlineMs": 497.37,
+            "domAssetAndNormalizeMs": 505.63,
+            "htmlSerializeMs": 51.98,
+            "totalMs": 1215.15,
+            "endToEndBuildDeliverySnapshotMs": 1230.69,
+            "domNodesCount": 21635,
+            "htmlBytes": 1552364
+          }
+        }
+      }
+    }
+  },
+  "typingSimulation": {
+    "small (2 sections, ~70 lines)": {
+      "keystrokeCount": 30,
+      "avgKeystrokeCallMs": 0.0041,
+      "maxKeystrokeCallMs": 0.0303,
+      "debouncedCommitTotalElapsedMs": 134.92,
+      "syncPhaseInRunSnapshotBuildMs": 11.89,
+      "fullRunSnapshotBuildMs": 11.9
+    },
+    "medium (8 sections, ~260 lines)": {
+      "keystrokeCount": 30,
+      "avgKeystrokeCallMs": 0.001,
+      "maxKeystrokeCallMs": 0.005,
+      "debouncedCommitTotalElapsedMs": 155.76,
+      "syncPhaseInRunSnapshotBuildMs": 33.3,
+      "fullRunSnapshotBuildMs": 33.31
+    },
+    "large (20 sections, ~650 lines)": {
+      "keystrokeCount": 30,
+      "avgKeystrokeCallMs": 0.001,
+      "maxKeystrokeCallMs": 0.0079,
+      "debouncedCommitTotalElapsedMs": 204.07,
+      "syncPhaseInRunSnapshotBuildMs": 79.97,
+      "fullRunSnapshotBuildMs": 79.98
+    },
+    "xlarge (185 sections, ~5200 lines)": {
+      "keystrokeCount": 30,
+      "avgKeystrokeCallMs": 0.0014,
+      "maxKeystrokeCallMs": 0.0083,
+      "debouncedCommitTotalElapsedMs": 1784.76,
+      "syncPhaseInRunSnapshotBuildMs": 1471.36,
+      "fullRunSnapshotBuildMs": 1471.37
+    }
+  }
+}

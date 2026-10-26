@@ -1,3 +1,5 @@
+import { build } from 'esbuild';
+import { chromium } from 'playwright';
 import { describe, expect, it } from 'vitest';
 import { buildDeliverySnapshot } from '../src/core/snapshot';
 import type { DeliverySnapshot } from '../src/core/snapshot';
@@ -8,6 +10,21 @@ import { png } from './support/fixtures';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function bundleMorphMdForBrowser(): Promise<string> {
+  const result = await build({
+    entryPoints: ['src/index.ts'],
+    bundle: true,
+    format: 'iife',
+    globalName: 'MorphMD',
+    platform: 'browser',
+    target: 'es2022',
+    write: false,
+    external: ['jsdom'],
+    logLevel: 'silent',
+  });
+  return result.outputFiles[0].text;
 }
 
 describe('TestEditorSessionController', () => {
@@ -491,4 +508,290 @@ describe('TestEditorSessionController', () => {
 
     session.dispose();
   });
+
+  it(
+    'test_browser_bundle_executes_session_and_all_targets_without_node_globals',
+    async () => {
+      const bundleCode = await bundleMorphMdForBrowser();
+      const pngBytes = Array.from(png(1, 32, 24));
+      const browser = await chromium.launch({ headless: true });
+
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="preview"></div></body></html>'
+        );
+        await page.addScriptTag({ content: bundleCode });
+
+        const result = await page.evaluate(async (rawPng: number[]) => {
+          const MorphMD = (window as unknown as Record<string, any>).MorphMD;
+          const hasGlobalBuffer = typeof (window as unknown as Record<string, any>).Buffer !== 'undefined';
+
+          const store = new MorphMD.AssetStore();
+          const asset = await store.ingest(new Uint8Array(rawPng), { fileName: 'hero.png' });
+
+          const doc = [
+            '# Browser Native Bundle Verification',
+            '',
+            `![Hero Banner](${asset.uri})`,
+            '',
+            '| Target | Transport | Status |',
+            '| --- | --- | --- |',
+            '| WeChat | Inline HTML | Ready |',
+            '| X Article | Draft.js Safe | Ready |',
+            '| Cards | Multi-page PNG/ZIP | Ready |',
+            '',
+            '> [!NOTE]',
+            '> Executing inside real headless Chromium without Node Buffer or node:zlib.',
+            '',
+            '```ts',
+            'export function verifyBrowserBundle(x: number): number {',
+            '  return x * 2;',
+            '}',
+            '```',
+            '',
+            'Inline math $E = mc^2$ and display math:',
+            '',
+            '$$',
+            '\\int_0^1 x^2 \\, dx = \\frac{1}{3}',
+            '$$',
+          ].join('\n');
+
+          const customCss = `
+            :root { --accent-color: #0f766e; }
+            .morph-h1 { color: var(--accent-color); }
+          `;
+
+          const previewEl = document.getElementById('preview')!;
+          const session = MorphMD.createEditorSession({
+            assetStore: store,
+            initialMarkdown: doc,
+            targetId: 'wechat',
+            customCss,
+          });
+
+          const wechatSnap = await session.waitForIdle();
+          previewEl.innerHTML = wechatSnap?.html ?? '';
+
+          const xSnap = await session.setTarget('x-article');
+          previewEl.innerHTML = xSnap.html;
+
+          const cardsSnap = await session.setTarget('cards');
+          previewEl.innerHTML = cardsSnap.html;
+
+          const zipPkg = await MorphMD.exportCardsZipPackage(cardsSnap, store, {
+            ratio: '3:4',
+            filePrefix: 'browser-bundle',
+          });
+          const zipEntries = MorphMD.parseZipArchive(zipPkg.zipData);
+
+          session.dispose();
+
+          return {
+            hasGlobalBuffer,
+            wechatReady: wechatSnap?.ready === true,
+            wechatHtmlLength: wechatSnap?.html.length ?? 0,
+            xArticleReady: xSnap.ready === true,
+            xArticleHtmlLength: xSnap.html.length,
+            cardsReady: cardsSnap.ready === true,
+            cardsPageCount: zipPkg.pages.length,
+            zipByteLength: zipPkg.zipData.byteLength,
+            zipEntryPaths: zipEntries.map((e: { path: string }) => e.path),
+          };
+        }, pngBytes);
+
+        evidence('browser-native-bundle-execution', result);
+
+        expect(result.hasGlobalBuffer).toBe(false);
+        expect(result.wechatReady).toBe(true);
+        expect(result.wechatHtmlLength).toBeGreaterThan(200);
+        expect(result.xArticleReady).toBe(true);
+        expect(result.xArticleHtmlLength).toBeGreaterThan(200);
+        expect(result.cardsReady).toBe(true);
+        expect(result.cardsPageCount).toBeGreaterThanOrEqual(1);
+        expect(result.zipByteLength).toBeGreaterThan(100);
+        expect(result.zipEntryPaths).toContain('manifest.json');
+        expect(result.zipEntryPaths.some((p: string) => p.endsWith('.png'))).toBe(true);
+      } finally {
+        await browser.close();
+      }
+    },
+    30000
+  );
+
+  it(
+    'test_browser_incremental_typing_and_multi_target_rendering_meet_latency_budget',
+    async () => {
+      const bundleCode = await bundleMorphMdForBrowser();
+      const pngBytes = Array.from(png(2, 64, 48));
+      const browser = await chromium.launch({ headless: true });
+
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="preview"></div></body></html>'
+        );
+        await page.addScriptTag({ content: bundleCode });
+
+        const metrics = await page.evaluate(async (rawPng: number[]) => {
+          const MorphMD = (window as unknown as Record<string, any>).MorphMD;
+          const store = new MorphMD.AssetStore();
+          const asset = await store.ingest(new Uint8Array(rawPng), { fileName: 'diagram.png' });
+
+          const sections = Array.from({ length: 8 }, (_, idx) =>
+            [
+              `## Section ${idx + 1}: Architecture & Performance Analysis`,
+              '',
+              `In section ${idx + 1}, we evaluate multi-target Markdown rendering with **bold emphasis**, *italic notes*, \`inlineCode(${idx})\`, and inline math $O(1)$ complexity.`,
+              '',
+              idx === 0
+                ? `![Architecture Diagram](${asset.uri})`
+                : `Paragraph ${idx + 1}.2: Isomorphic delivery snapshots ensure right-pane preview and clipboard export remain 100% consistent.`,
+              '',
+              '| Target | Cold Render | Incremental Budget | Status |',
+              '| :--- | :---: | :---: | :--- |',
+              `| WeChat | 120ms | < 35ms | Active ${idx + 1} |`,
+              `| X Article | 180ms | < 45ms | Verified ${idx + 1} |`,
+              `| Cards 3:4 | 95ms | < 35ms | Paginated ${idx + 1} |`,
+              '',
+              '> [!TIP]',
+              '> Keeping AST parsing and style inlining fast ensures 60fps typing responsiveness.',
+              '',
+              '```ts',
+              `export function computeMetric_${idx}(values: number[]): number {`,
+              `  return values.reduce((acc, v) => acc + v * ${idx + 1}, 0);`,
+              '}',
+              '```',
+              '',
+              '$$',
+              `\\mathcal{L}_{${idx}}(\\theta) = \\sum_{i=1}^{n} (y_i - \\hat{y}_i)^2 + \\lambda \\|\\theta\\|_2^2`,
+              '$$',
+              '',
+              `- Primary item ${idx + 1}.1`,
+              `  - Nested detail ${idx + 1}.1.a`,
+              `  - Nested detail ${idx + 1}.1.b`,
+              `- Secondary item ${idx + 1}.2`,
+            ].join('\n')
+          ).join('\n\n');
+
+          const baseDoc = `# MorphMD Real-Time Typing Benchmark\n\n${sections}`;
+          const lineCount = baseDoc.split('\n').length;
+
+          const customCss = `
+            :root {
+              --brand-color: #2563eb;
+              --card-bg: #f8fafc;
+            }
+            .morph-h2 {
+              color: var(--brand-color);
+              border-bottom: 2px solid var(--brand-color);
+            }
+            .morph-blockquote {
+              background-color: var(--card-bg);
+            }
+            .morph-h2::before {
+              content: "§ ";
+              color: var(--brand-color);
+            }
+          `;
+
+          const previewEl = document.getElementById('preview')!;
+          const session = MorphMD.createEditorSession({
+            assetStore: store,
+            debounceMs: 60,
+            initialMarkdown: baseDoc,
+            targetId: 'wechat',
+            customCss,
+          });
+
+          session.subscribe((snap: { html: string }) => {
+            previewEl.innerHTML = snap.html;
+          });
+
+          await session.waitForIdle();
+          session.flushRenderFrame();
+
+          // 1. Measure 20 rapid synchronous inputDoc keystrokes
+          const inputSyncTimes: number[] = [];
+          let currentDoc = baseDoc + '\n\nTyping: ';
+          for (let i = 1; i <= 20; i++) {
+            currentDoc += String.fromCharCode(97 + (i % 26));
+            const t0 = performance.now();
+            session.inputDoc(currentDoc);
+            const t1 = performance.now();
+            inputSyncTimes.push(t1 - t0);
+          }
+          await session.flush();
+          session.flushRenderFrame();
+
+          // 2. Measure warm incremental commitDoc turnaround on wechat
+          await session.commitDoc(`${currentDoc} [wechat-warmup]`);
+          session.flushRenderFrame();
+          const wechatTimes: number[] = [];
+          for (let i = 1; i <= 5; i++) {
+            const nextDoc = `${currentDoc} [wechat-edit-${i}]`;
+            const t0 = performance.now();
+            await session.commitDoc(nextDoc);
+            session.flushRenderFrame();
+            const t1 = performance.now();
+            wechatTimes.push(t1 - t0);
+          }
+
+          // 3. Measure warm incremental commitDoc turnaround on cards
+          await session.setTarget('cards');
+          session.flushRenderFrame();
+          await session.commitDoc(`${currentDoc} [cards-warmup]`);
+          session.flushRenderFrame();
+          const cardsTimes: number[] = [];
+          for (let i = 1; i <= 5; i++) {
+            const nextDoc = `${currentDoc} [cards-edit-${i}]`;
+            const t0 = performance.now();
+            await session.commitDoc(nextDoc);
+            session.flushRenderFrame();
+            const t1 = performance.now();
+            cardsTimes.push(t1 - t0);
+          }
+
+          // 4. Measure warm incremental commitDoc turnaround on x-article (editing text while keeping tables/math unchanged)
+          await session.setTarget('x-article');
+          session.flushRenderFrame();
+          await session.commitDoc(`${currentDoc} [x-warmup]`);
+          session.flushRenderFrame();
+          const xArticleTimes: number[] = [];
+          for (let i = 1; i <= 5; i++) {
+            const nextDoc = `${currentDoc} [x-edit-${i}]`;
+            const t0 = performance.now();
+            await session.commitDoc(nextDoc);
+            session.flushRenderFrame();
+            const t1 = performance.now();
+            xArticleTimes.push(t1 - t0);
+          }
+
+          session.dispose();
+
+          const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length;
+          return {
+            lineCount,
+            inputAvgMs: avg(inputSyncTimes),
+            inputMaxMs: Math.max(...inputSyncTimes),
+            wechatIncrementalAvgMs: avg(wechatTimes),
+            cardsIncrementalAvgMs: avg(cardsTimes),
+            xArticleIncrementalAvgMs: avg(xArticleTimes),
+          };
+        }, pngBytes);
+
+        evidence('browser-session-latency-benchmark', metrics);
+
+        expect(metrics.lineCount).toBeGreaterThanOrEqual(220);
+        expect(metrics.inputAvgMs).toBeLessThan(0.5);
+        expect(metrics.inputMaxMs).toBeLessThan(2);
+        expect(metrics.wechatIncrementalAvgMs).toBeLessThan(35);
+        expect(metrics.cardsIncrementalAvgMs).toBeLessThan(35);
+        expect(metrics.xArticleIncrementalAvgMs).toBeLessThan(45);
+      } finally {
+        await browser.close();
+      }
+    },
+    30000
+  );
 });

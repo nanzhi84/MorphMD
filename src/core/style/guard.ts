@@ -288,8 +288,13 @@ export function computeElementVarScope(
   rootContainer: Element,
   _doc: Document,
   rules: CSSStyleRule[],
-  allTokens: Record<string, string>
+  allTokens: Record<string, string>,
+  scopeCache?: WeakMap<Element, Record<string, string>>
 ): Record<string, string> {
+  if (scopeCache?.has(el)) {
+    return scopeCache.get(el)!;
+  }
+
   const chain: Element[] = [];
   let currEl: Element | null = el;
   while (currEl && currEl.tagName.toLowerCase() !== 'body') {
@@ -301,17 +306,37 @@ export function computeElementVarScope(
     chain.unshift(_doc.documentElement);
   }
 
+  // Pre-filter rules that actually declare at least one custom property (--*)
+  const rulesWithCustomProps: Array<{ rule: any; ruleIdx: number; customProps: string[] }> = [];
+  for (let ruleIdx = 0; ruleIdx < rules.length; ruleIdx++) {
+    const cr = rules[ruleIdx] as any;
+    if (!cr.selectorText || !cr.style) continue;
+    const customProps: string[] = [];
+    for (let k = 0; k < cr.style.length; k++) {
+      const prop = cr.style[k];
+      if (prop.startsWith('--')) {
+        customProps.push(prop);
+      }
+    }
+    if (customProps.length > 0) {
+      rulesWithCustomProps.push({ rule: cr, ruleIdx, customProps });
+    }
+  }
+
   let currentScope: Record<string, string> = resolveScopeCustomProperties(allTokens, {});
 
   for (const ancestor of chain) {
+    if (scopeCache?.has(ancestor)) {
+      currentScope = scopeCache.get(ancestor)!;
+      continue;
+    }
+
     const customByLayer = new Map<
       string,
       Map<string, { value: string; priority: { important: boolean; isInline?: boolean; layerOrder?: string; specificity: [number, number, number]; sourceOrder: number } }>
     >();
 
-    for (let ruleIdx = 0; ruleIdx < rules.length; ruleIdx++) {
-      const cr = rules[ruleIdx] as any;
-      if (!cr.selectorText || !cr.style) continue;
+    for (const { rule: cr, ruleIdx, customProps } of rulesWithCustomProps) {
       try {
         if (ancestor.matches(cr.selectorText)) {
           let matchedSpec: [number, number, number] = [0, 0, 0];
@@ -333,18 +358,15 @@ export function computeElementVarScope(
           }
 
           const layerOrder: string = cr.__morphLayerOrder ?? 'unlayered';
-          for (let k = 0; k < cr.style.length; k++) {
-            const prop = cr.style[k];
-            if (prop.startsWith('--')) {
-              const important = cr.style.getPropertyPriority(prop) === 'important';
-              const key = `${layerOrder}_${important ? 1 : 0}`;
-              const candPriority = { important, isInline: false, layerOrder, specificity: matchedSpec, sourceOrder: ruleIdx };
-              if (!customByLayer.has(prop)) customByLayer.set(prop, new Map());
-              const layerDecls = customByLayer.get(prop)!;
-              const existing = layerDecls.get(key);
-              if (!existing || comparePriority(candPriority, existing.priority) >= 0) {
-                layerDecls.set(key, { value: trimCssWhitespace(cr.style.getPropertyValue(prop)), priority: candPriority });
-              }
+          for (const prop of customProps) {
+            const important = cr.style.getPropertyPriority(prop) === 'important';
+            const key = `${layerOrder}_${important ? 1 : 0}`;
+            const candPriority = { important, isInline: false, layerOrder, specificity: matchedSpec, sourceOrder: ruleIdx };
+            if (!customByLayer.has(prop)) customByLayer.set(prop, new Map());
+            const layerDecls = customByLayer.get(prop)!;
+            const existing = layerDecls.get(key);
+            if (!existing || comparePriority(candPriority, existing.priority) >= 0) {
+              layerDecls.set(key, { value: trimCssWhitespace(cr.style.getPropertyValue(prop)), priority: candPriority });
             }
           }
         }
@@ -370,19 +392,23 @@ export function computeElementVarScope(
       }
     }
 
-    const rawLocal: Record<string, string> = {};
-    const rawLocalLayers: Record<string, LayerCandidate[]> = {};
-    for (const [prop, layerDecls] of customByLayer.entries()) {
-      const sorted = Array.from(layerDecls.values())
-        .sort((a, b) => comparePriority(b.priority, a.priority));
-      rawLocalLayers[prop] = sorted.map((x) => ({
-        value: x.value,
-        layerOrder: x.priority.layerOrder ?? 'unlayered',
-        important: x.priority.important,
-      }));
-      rawLocal[prop] = sorted[0].value;
+    if (customByLayer.size > 0) {
+      const rawLocal: Record<string, string> = {};
+      const rawLocalLayers: Record<string, LayerCandidate[]> = {};
+      for (const [prop, layerDecls] of customByLayer.entries()) {
+        const sorted = Array.from(layerDecls.values())
+          .sort((a, b) => comparePriority(b.priority, a.priority));
+        rawLocalLayers[prop] = sorted.map((x) => ({
+          value: x.value,
+          layerOrder: x.priority.layerOrder ?? 'unlayered',
+          important: x.priority.important,
+        }));
+        rawLocal[prop] = sorted[0].value;
+      }
+      currentScope = resolveScopeCustomProperties(rawLocal, currentScope, rawLocalLayers);
     }
-    currentScope = resolveScopeCustomProperties(rawLocal, currentScope, rawLocalLayers);
+
+    scopeCache?.set(ancestor, currentScope);
   }
 
   return currentScope;
@@ -395,10 +421,10 @@ export function isRasterBlockOrDescendant(el: Element, capabilities: AdapterCapa
   let curr: Element | null = el;
   while (curr && curr.tagName.toLowerCase() !== 'body') {
     const tagName = curr.tagName.toLowerCase();
-    const classList = Array.from(curr.classList);
+    const cl = curr.classList;
     if (tagName === 'table' && capabilities.rasterizeBlocks.has('table')) return true;
-    if ((tagName === 'pre' || classList.includes('morph-code')) && capabilities.rasterizeBlocks.has('code')) return true;
-    if (classList.includes('morph-math') && capabilities.rasterizeBlocks.has('math')) return true;
+    if ((tagName === 'pre' || (cl && cl.contains('morph-code'))) && capabilities.rasterizeBlocks.has('code')) return true;
+    if (cl && cl.contains('morph-math') && capabilities.rasterizeBlocks.has('math')) return true;
     if (tagName === 'svg' && capabilities.rasterizeBlocks.has('svg')) return true;
     curr = curr.parentElement;
   }

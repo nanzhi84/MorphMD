@@ -44,18 +44,15 @@ function extractRawText(node: any): string {
   return '';
 }
 
-function stripDescendantPositions(el: Element, formulaRange?: string): void {
+function stripDescendantPositions(el: Element): void {
   for (const child of el.children) {
     if (child.type === 'element') {
       delete child.position;
-      const props = (child.properties || (child.properties = {})) as Record<string, unknown>;
-      delete props.dataNodeId;
-      if (formulaRange) {
-        props.dataSourceRange = formulaRange;
-      } else {
-        delete props.dataSourceRange;
+      if (child.properties) {
+        delete child.properties.dataNodeId;
+        delete child.properties.dataSourceRange;
       }
-      stripDescendantPositions(child, formulaRange);
+      stripDescendantPositions(child);
     }
   }
 }
@@ -109,7 +106,7 @@ export function transformMathAndCode(
             renderedHtml = katex.renderToString(rawTex, {
               displayMode,
               throwOnError: true,
-              output: 'htmlAndMathml',
+              output: 'mathml',
             });
           } catch (err) {
             hasRenderError = true;
@@ -123,7 +120,7 @@ export function transformMathAndCode(
               renderedHtml = katex.renderToString(rawTex, {
                 displayMode,
                 throwOnError: false,
-                output: 'htmlAndMathml',
+                output: 'mathml',
               });
             } catch {
               renderedHtml = `<span class="katex-error">${rawTex}</span>`;
@@ -140,17 +137,24 @@ export function transformMathAndCode(
             },
             children: fragment.children as Element[],
           };
+          stripDescendantPositions(mathHast);
 
           if (cache && !hasRenderError) {
             cache.set('math', contentHash, modeKey, themeKey, targetCapabilityVersion, mathHast);
           }
         }
 
-        const mathNodeClone: Element = JSON.parse(JSON.stringify(mathHast));
-        mathNodeClone.position = node.position;
-
-        const formulaRange = node.position ? `${node.position.start.line}-${node.position.end.line}` : undefined;
-        stripDescendantPositions(mathNodeClone, formulaRange);
+        const mathNodeClone: Element = {
+          ...mathHast,
+          properties: {
+            ...mathHast.properties,
+            className: Array.isArray(mathHast.properties?.className)
+              ? [...mathHast.properties.className]
+              : mathHast.properties?.className,
+          },
+          children: [...mathHast.children],
+          position: node.position,
+        };
 
         parent.children[index] = mathNodeClone;
       }
@@ -215,9 +219,6 @@ export function transformMathAndCode(
           themeKey,
           targetCapabilityVersion
         );
-        if (codeHast) {
-          codeHast = JSON.parse(JSON.stringify(codeHast));
-        }
 
         if (!codeHast) {
           if (highlighter && isSupportedLang) {
@@ -245,6 +246,7 @@ export function transformMathAndCode(
               preElement.properties.className = existingClasses;
               delete preElement.properties.class;
               preElement.properties.dataCodeLang = lang || 'text';
+              stripDescendantPositions(preElement);
 
               codeHast = preElement;
               if (cache) {
@@ -288,11 +290,19 @@ export function transformMathAndCode(
           }
         }
 
-        const codeNodeClone: Element = JSON.parse(JSON.stringify(codeHast));
-        if (extraMediaChildren.length > 0) {
-          codeNodeClone.children.push(...extraMediaChildren);
-        }
-        codeNodeClone.position = node.position;
+        const codeNodeClone: Element = {
+          ...codeHast,
+          properties: {
+            ...codeHast.properties,
+            className: Array.isArray(codeHast.properties?.className)
+              ? [...codeHast.properties.className]
+              : codeHast.properties?.className,
+          },
+          children: extraMediaChildren.length > 0
+            ? [...codeHast.children, ...extraMediaChildren]
+            : [...codeHast.children],
+          position: node.position,
+        };
         parent.children[index] = codeNodeClone;
       }
     }

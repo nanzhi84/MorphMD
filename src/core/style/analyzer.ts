@@ -124,7 +124,13 @@ export function compareLayerOrder(a: string = 'unlayered', b: string = 'unlayere
   return 0;
 }
 
+const splitSelectorCache = new Map<string, string[]>();
+const specificityCache = new Map<string, [number, number, number]>();
+const analyzeStylesCache = new Map<string, StyleAnalysisResult>();
+
 export function splitSelectorList(selector: string): string[] {
+  const cached = splitSelectorCache.get(selector);
+  if (cached) return cached;
   const parts: string[] = [];
   let current = '', parenDepth = 0, bracketDepth = 0, inQuote: string | null = null;
   for (let i = 0; i < selector.length; i++) {
@@ -149,6 +155,11 @@ export function splitSelectorList(selector: string): string[] {
     }
   }
   if (current.trim()) parts.push(current.trim());
+  if (splitSelectorCache.size >= 1024) {
+    const firstKey = splitSelectorCache.keys().next().value;
+    if (firstKey !== undefined) splitSelectorCache.delete(firstKey);
+  }
+  splitSelectorCache.set(selector, parts);
   return parts;
 }
 
@@ -157,6 +168,8 @@ export function compareSpecificity(a: [number, number, number], b: [number, numb
 }
 
 export function computeSelectorSpecificity(rawSelector: string): [number, number, number] {
+  const cached = specificityCache.get(rawSelector);
+  if (cached) return cached;
   let ast: csstree.CssNode;
   try {
     ast = csstree.parse(rawSelector, { context: 'selector' });
@@ -230,13 +243,31 @@ export function computeSelectorSpecificity(rawSelector: string): [number, number
     },
   });
 
-  return [a, b, c];
+  const specResult: [number, number, number] = [a, b, c];
+  if (specificityCache.size >= 1024) {
+    const firstKey = specificityCache.keys().next().value;
+    if (firstKey !== undefined) specificityCache.delete(firstKey);
+  }
+  specificityCache.set(rawSelector, specResult);
+  return specResult;
 }
 
 export function analyzeStyles(
   cssText: string,
   targetId?: TargetId
 ): StyleAnalysisResult {
+  const cacheKey = `${targetId ?? ''}::${cssText}`;
+  const cached = analyzeStylesCache.get(cacheKey);
+  if (cached) {
+    return {
+      sanitizedCss: cached.sanitizedCss,
+      propertyWhitelist: new Set(cached.propertyWhitelist),
+      pseudoRules: [...cached.pseudoRules],
+      diagnostics: cached.diagnostics.map((d) => ({ ...d })),
+      customProperties: new Map(cached.customProperties),
+    };
+  }
+
   const diagnostics: DiagnosticItem[] = [];
   const propertyWhitelist = new Set<string>();
   const pseudoRules: PseudoRuleDescriptor[] = [];
@@ -469,5 +500,23 @@ export function analyzeStyles(
   });
 
   const sanitizedCss = csstree.generate(ast);
-  return { sanitizedCss, propertyWhitelist, pseudoRules, diagnostics, customProperties };
+  const result: StyleAnalysisResult = {
+    sanitizedCss,
+    propertyWhitelist,
+    pseudoRules,
+    diagnostics,
+    customProperties,
+  };
+  if (analyzeStylesCache.size >= 256) {
+    const firstKey = analyzeStylesCache.keys().next().value;
+    if (firstKey !== undefined) analyzeStylesCache.delete(firstKey);
+  }
+  analyzeStylesCache.set(cacheKey, {
+    sanitizedCss,
+    propertyWhitelist: new Set(propertyWhitelist),
+    pseudoRules: [...pseudoRules],
+    diagnostics: diagnostics.map((d) => ({ ...d })),
+    customProperties: new Map(customProperties),
+  });
+  return result;
 }

@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import remarkRehype from 'remark-rehype';
 import rehypeRaw from 'rehype-raw';
-import { visit } from 'unist-util-visit';
+import { visit, SKIP } from 'unist-util-visit';
 import { toHtml } from 'hast-util-to-html';
 import type { Root, Element } from 'hast';
 import type { DiagnosticItem, SourceRangeEntry } from '../snapshot/types';
@@ -33,6 +33,13 @@ function ensureClass(props: Record<string, unknown>, className: string): void {
 }
 
 function computeSemanticSignature(node: any): string {
+  if (node?.type === 'element') {
+    const topProps = node.properties || {};
+    const mathTex = topProps['data-math-tex'] !== undefined ? topProps['data-math-tex'] : topProps.dataMathTex;
+    if (mathTex !== undefined) {
+      return `<${node.tagName} data-math-tex="${String(mathTex)}"></${node.tagName}>`;
+    }
+  }
   let sig = '';
   function walk(n: any) {
     if (!n) return;
@@ -103,6 +110,15 @@ function normalizeOrphanTableHtml() {
   };
 }
 
+const BASE_PROCESSOR = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkMath)
+  .use(normalizeOrphanTableHtml)
+  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(rehypeRaw)
+  .freeze();
+
 function runCompile(
   markdown: string,
   options: CompileOptions,
@@ -112,15 +128,7 @@ function runCompile(
   const diagnostics: DiagnosticItem[] = [];
   const sourceMap: SourceRangeEntry[] = [];
 
-  const processor = unified()
-    .use(remarkParse)
-    .use(remarkGfm)
-    .use(remarkMath)
-    .use(normalizeOrphanTableHtml)
-    .use(remarkRehype, { allowDangerousHtml: true })
-    .use(rehypeRaw);
-
-  const rawHast = processor.runSync(processor.parse(markdown)) as Root;
+  const rawHast = BASE_PROCESSOR.runSync(BASE_PROCESSOR.parse(markdown)) as Root;
 
   // 1. Sanitize raw HTML and dangerous attributes
   sanitizeHast(rawHast, diagnostics);
@@ -134,6 +142,10 @@ function runCompile(
   // 4. Map semantic classes & images
   visit(rawHast, 'element', (node: Element) => {
     const props = (node.properties || (node.properties = {})) as Record<string, unknown>;
+
+    if (props.dataMathTex !== undefined || props['data-math-tex'] !== undefined) {
+      return SKIP;
+    }
 
     if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(node.tagName)) {
       ensureClass(props, `morph-${node.tagName}`);
@@ -152,6 +164,19 @@ function runCompile(
         const assetId = src.replace('morph-asset://', '').split('?')[0].split('#')[0];
         props.dataMorphAssetId = assetId;
       }
+    } else if (node.tagName === 'pre') {
+      for (const child of node.children) {
+        if (child.type === 'element' && child.tagName === 'img') {
+          const imgProps = (child.properties || (child.properties = {})) as Record<string, unknown>;
+          ensureClass(imgProps, 'morph-img');
+          const src = typeof imgProps.src === 'string' ? imgProps.src : '';
+          if (src.startsWith('morph-asset://')) {
+            const assetId = src.replace('morph-asset://', '').split('?')[0].split('#')[0];
+            imgProps.dataMorphAssetId = assetId;
+          }
+        }
+      }
+      return SKIP;
     }
   });
 
@@ -188,6 +213,10 @@ function runCompile(
           endOffset: node.position.end.offset,
         });
       }
+    }
+
+    if (node.tagName === 'pre' || props.dataMathTex !== undefined || props['data-math-tex'] !== undefined) {
+      return SKIP;
     }
   });
 

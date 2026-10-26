@@ -1,5 +1,13 @@
-import { deflateSync, inflateRawSync } from 'node:zlib';
 import type { AssetStore } from '../assets/store';
+import {
+  computeCrc32Bytes,
+  concatUint8Arrays,
+  encodeRgbPngBytes,
+  inflateRawBytes,
+  uint8ToBase64,
+  writeUInt16LE,
+  writeUInt32LE,
+} from '../dom/binary';
 import { parseDocument } from '../dom/env';
 import type { DeliverySnapshot, DiagnosticItem } from '../snapshot/types';
 import { paginateDom } from './paginator';
@@ -14,26 +22,8 @@ import type {
   ZipEntryRecord,
 } from './types';
 
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-const CRC32_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let k = 0; k < 8; k++) {
-      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    }
-    table[i] = c >>> 0;
-  }
-  return table;
-})();
-
 export function computeCrc32(data: Uint8Array): number {
-  let crc = 0xffffffff;
-  for (let i = 0; i < data.byteLength; i++) {
-    crc = CRC32_TABLE[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
+  return computeCrc32Bytes(data);
 }
 
 function hashFnv1a32(input: string, seed = 0x811c9dc5): number {
@@ -87,38 +77,8 @@ function isValidRatio(value: unknown): value is CardAspectRatio {
   return typeof value === 'string' && value in CARD_RATIO_PRESETS;
 }
 
-function buildPngChunk(type: string, payload: Buffer): Buffer {
-  const len = payload.byteLength;
-  const out = Buffer.allocUnsafe(12 + len);
-  out.writeUInt32BE(len, 0);
-  out.write(type, 4, 4, 'ascii');
-  if (len > 0) {
-    payload.copy(out, 8);
-  }
-  const crc = computeCrc32(out.subarray(4, 8 + len));
-  out.writeUInt32BE(crc, 8 + len);
-  return out;
-}
-
-function encodeRgbPng(width: number, height: number, rawRows: Buffer): Uint8Array {
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; // 8-bit per channel
-  ihdr[9] = 2; // Truecolor RGB
-  ihdr[10] = 0; // compression
-  ihdr[11] = 0; // filter
-  ihdr[12] = 0; // interlace
-
-  const compressed = deflateSync(rawRows, { level: 1 });
-  const pngBuffer = Buffer.concat([
-    PNG_MAGIC,
-    buildPngChunk('IHDR', ihdr),
-    buildPngChunk('IDAT', compressed),
-    buildPngChunk('IEND', Buffer.alloc(0)),
-  ]);
-
-  return new Uint8Array(pngBuffer.buffer, pngBuffer.byteOffset, pngBuffer.byteLength);
+function encodeRgbPng(width: number, height: number, rawRows: Uint8Array): Uint8Array {
+  return encodeRgbPngBytes(width, height, rawRows);
 }
 
 interface ExtractedBlockDescriptor {
@@ -311,13 +271,13 @@ export async function rasterizeCardPage(
   const mutedTextColor = mixRgb(bgColor, textColor, 0.55);
 
   const rowStride = width * 3 + 1;
-  const rawRows = Buffer.allocUnsafe(rowStride * height);
+  const rawRows = new Uint8Array(rowStride * height);
 
   const borderPx = Math.max(2, Math.round(2 * exportScale));
   const topAccentH = Math.max(4, Math.round(6 * exportScale));
 
   // Build reusable scanline templates for ultra-fast memory copy
-  const borderRow = Buffer.allocUnsafe(rowStride);
+  const borderRow = new Uint8Array(rowStride);
   borderRow[0] = 0;
   for (let x = 0; x < width; x++) {
     const off = 1 + x * 3;
@@ -326,7 +286,7 @@ export async function rasterizeCardPage(
     borderRow[off + 2] = borderColor[2];
   }
 
-  const accentRow = Buffer.allocUnsafe(rowStride);
+  const accentRow = new Uint8Array(rowStride);
   accentRow[0] = 0;
   for (let x = 0; x < width; x++) {
     const off = 1 + x * 3;
@@ -337,7 +297,7 @@ export async function rasterizeCardPage(
     accentRow[off + 2] = c[2];
   }
 
-  const bgRow = Buffer.allocUnsafe(rowStride);
+  const bgRow = new Uint8Array(rowStride);
   bgRow[0] = 0;
   for (let x = 0; x < width; x++) {
     const off = 1 + x * 3;
@@ -351,11 +311,11 @@ export async function rasterizeCardPage(
   for (let y = 0; y < height; y++) {
     const destOffset = y * rowStride;
     if (y < borderPx || y >= height - borderPx) {
-      borderRow.copy(rawRows, destOffset);
+      rawRows.set(borderRow, destOffset);
     } else if (y < borderPx + topAccentH) {
-      accentRow.copy(rawRows, destOffset);
+      rawRows.set(accentRow, destOffset);
     } else {
-      bgRow.copy(rawRows, destOffset);
+      rawRows.set(bgRow, destOffset);
     }
   }
 
@@ -380,8 +340,9 @@ export async function rasterizeCardPage(
       rawRows[off + 2] = color[2];
     }
     const byteLen = (endX - startX) * 3;
+    const firstRowSlice = rawRows.subarray(firstRowStart, firstRowStart + byteLen);
     for (let y = startY + 1; y < endY; y++) {
-      rawRows.copy(rawRows, y * rowStride + 1 + startX * 3, firstRowStart, firstRowStart + byteLen);
+      rawRows.set(firstRowSlice, y * rowStride + 1 + startX * 3);
     }
   };
 
@@ -543,7 +504,7 @@ export async function rasterizeCardPage(
 
   const pngData = encodeRgbPng(width, height, rawRows);
   const crc32 = computeCrc32(pngData);
-  const base64 = Buffer.from(pngData.buffer, pngData.byteOffset, pngData.byteLength).toString('base64');
+  const base64 = uint8ToBase64(pngData);
 
   return {
     pageNumber,
@@ -771,76 +732,75 @@ export function createZipArchive(
   entries: ReadonlyArray<{ path: string; data: Uint8Array }>,
 ): Uint8Array {
   const encoder = new TextEncoder();
-  const localParts: Buffer[] = [];
-  const centralParts: Buffer[] = [];
+  const localParts: Uint8Array[] = [];
+  const centralParts: Uint8Array[] = [];
   let currentOffset = 0;
 
   for (const entry of entries) {
     const safePath = validateSafeZipEntryPath(entry.path);
-    const nameBytes = Buffer.from(encoder.encode(safePath));
-    const payload = Buffer.from(entry.data.buffer, entry.data.byteOffset, entry.data.byteLength);
+    const nameBytes = encoder.encode(safePath);
+    const payload = new Uint8Array(entry.data.buffer, entry.data.byteOffset, entry.data.byteLength);
     const crc = computeCrc32(entry.data);
     const size = payload.byteLength;
 
     // Local File Header (30 bytes + filename)
-    const localHeader = Buffer.alloc(30 + nameBytes.byteLength);
-    localHeader.writeUInt32LE(0x04034b50, 0); // PK\x03\x04
-    localHeader.writeUInt16LE(20, 4); // version needed to extract (2.0)
-    localHeader.writeUInt16LE(0x0800, 6); // UTF-8 filename flag
-    localHeader.writeUInt16LE(0, 8); // compression method: 0 (Store)
-    localHeader.writeUInt16LE(0, 10); // mod time
-    localHeader.writeUInt16LE(0x2100, 12); // mod date
-    localHeader.writeUInt32LE(crc, 14); // crc-32
-    localHeader.writeUInt32LE(size, 18); // compressed size
-    localHeader.writeUInt32LE(size, 22); // uncompressed size
-    localHeader.writeUInt16LE(nameBytes.byteLength, 26); // filename length
-    localHeader.writeUInt16LE(0, 28); // extra field length
-    nameBytes.copy(localHeader, 30);
+    const localHeader = new Uint8Array(30 + nameBytes.byteLength);
+    writeUInt32LE(localHeader, 0x04034b50, 0); // PK\x03\x04
+    writeUInt16LE(localHeader, 20, 4); // version needed to extract (2.0)
+    writeUInt16LE(localHeader, 0x0800, 6); // UTF-8 filename flag
+    writeUInt16LE(localHeader, 0, 8); // compression method: 0 (Store)
+    writeUInt16LE(localHeader, 0, 10); // mod time
+    writeUInt16LE(localHeader, 0x2100, 12); // mod date
+    writeUInt32LE(localHeader, crc, 14); // crc-32
+    writeUInt32LE(localHeader, size, 18); // compressed size
+    writeUInt32LE(localHeader, size, 22); // uncompressed size
+    writeUInt16LE(localHeader, nameBytes.byteLength, 26); // filename length
+    writeUInt16LE(localHeader, 0, 28); // extra field length
+    localHeader.set(nameBytes, 30);
 
     localParts.push(localHeader, payload);
 
     // Central Directory File Header (46 bytes + filename)
-    const centralHeader = Buffer.alloc(46 + nameBytes.byteLength);
-    centralHeader.writeUInt32LE(0x02014b50, 0); // PK\x01\x02
-    centralHeader.writeUInt16LE(20, 4); // version made by
-    centralHeader.writeUInt16LE(20, 6); // version needed to extract
-    centralHeader.writeUInt16LE(0x0800, 8); // UTF-8 flag
-    centralHeader.writeUInt16LE(0, 10); // compression method: 0 (Store)
-    centralHeader.writeUInt16LE(0, 12); // mod time
-    centralHeader.writeUInt16LE(0x2100, 14); // mod date
-    centralHeader.writeUInt32LE(crc, 16); // crc-32
-    centralHeader.writeUInt32LE(size, 20); // compressed size
-    centralHeader.writeUInt32LE(size, 24); // uncompressed size
-    centralHeader.writeUInt16LE(nameBytes.byteLength, 28); // filename length
-    centralHeader.writeUInt16LE(0, 30); // extra field length
-    centralHeader.writeUInt16LE(0, 32); // file comment length
-    centralHeader.writeUInt16LE(0, 34); // disk number start
-    centralHeader.writeUInt16LE(0, 36); // internal file attributes
-    centralHeader.writeUInt32LE(0, 38); // external file attributes
-    centralHeader.writeUInt32LE(currentOffset, 42); // relative offset of local header
-    nameBytes.copy(centralHeader, 46);
+    const centralHeader = new Uint8Array(46 + nameBytes.byteLength);
+    writeUInt32LE(centralHeader, 0x02014b50, 0); // PK\x01\x02
+    writeUInt16LE(centralHeader, 20, 4); // version made by
+    writeUInt16LE(centralHeader, 20, 6); // version needed to extract
+    writeUInt16LE(centralHeader, 0x0800, 8); // UTF-8 flag
+    writeUInt16LE(centralHeader, 0, 10); // compression method: 0 (Store)
+    writeUInt16LE(centralHeader, 0, 12); // mod time
+    writeUInt16LE(centralHeader, 0x2100, 14); // mod date
+    writeUInt32LE(centralHeader, crc, 16); // crc-32
+    writeUInt32LE(centralHeader, size, 20); // compressed size
+    writeUInt32LE(centralHeader, size, 24); // uncompressed size
+    writeUInt16LE(centralHeader, nameBytes.byteLength, 28); // filename length
+    writeUInt16LE(centralHeader, 0, 30); // extra field length
+    writeUInt16LE(centralHeader, 0, 32); // file comment length
+    writeUInt16LE(centralHeader, 0, 34); // disk number start
+    writeUInt16LE(centralHeader, 0, 36); // internal file attributes
+    writeUInt32LE(centralHeader, 0, 38); // external file attributes
+    writeUInt32LE(centralHeader, currentOffset, 42); // relative offset of local header
+    centralHeader.set(nameBytes, 46);
 
     centralParts.push(centralHeader);
     currentOffset += localHeader.byteLength + size;
   }
 
   const centralDirOffset = currentOffset;
-  const centralDirBuffer = Buffer.concat(centralParts);
+  const centralDirBuffer = concatUint8Arrays(centralParts);
   const centralDirSize = centralDirBuffer.byteLength;
 
   // End of Central Directory Record (22 bytes)
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0); // PK\x05\x06
-  eocd.writeUInt16LE(0, 4); // number of this disk
-  eocd.writeUInt16LE(0, 6); // disk where central directory starts
-  eocd.writeUInt16LE(entries.length, 8); // central directory records on this disk
-  eocd.writeUInt16LE(entries.length, 10); // total central directory records
-  eocd.writeUInt32LE(centralDirSize, 12); // size of central directory
-  eocd.writeUInt32LE(centralDirOffset, 16); // offset of start of central directory
-  eocd.writeUInt16LE(0, 20); // comment length
+  const eocd = new Uint8Array(22);
+  writeUInt32LE(eocd, 0x06054b50, 0); // PK\x05\x06
+  writeUInt16LE(eocd, 0, 4); // number of this disk
+  writeUInt16LE(eocd, 0, 6); // disk where central directory starts
+  writeUInt16LE(eocd, entries.length, 8); // central directory records on this disk
+  writeUInt16LE(eocd, entries.length, 10); // total central directory records
+  writeUInt32LE(eocd, centralDirSize, 12); // size of central directory
+  writeUInt32LE(eocd, centralDirOffset, 16); // offset of start of central directory
+  writeUInt16LE(eocd, 0, 20); // comment length
 
-  const archive = Buffer.concat([...localParts, centralDirBuffer, eocd]);
-  return new Uint8Array(archive.buffer, archive.byteOffset, archive.byteLength);
+  return concatUint8Arrays([...localParts, centralDirBuffer, eocd]);
 }
 
 export function parseZipArchive(zipData: Uint8Array): ZipEntryRecord[] {
@@ -925,7 +885,7 @@ export function parseZipArchive(zipData: Uint8Array): ZipEntryRecord[] {
     const extractedData =
       compressionMethod === 0
         ? compressedSlice.slice()
-        : new Uint8Array(inflateRawSync(compressedSlice));
+        : inflateRawBytes(compressedSlice, uncompressedSize);
 
     if (extractedData.byteLength !== uncompressedSize) {
       throw new Error(

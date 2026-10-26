@@ -5,7 +5,6 @@ import type { AssetStore } from '../assets/store';
 import { inlineStyles } from '../style/inliner';
 import { getDefaultCapabilities } from '../style/guard';
 import type { DesignTokens } from '../style/tokens';
-import { parseDocument } from '../dom/env';
 import { dedupeWeChatNesting } from '../wechat/normalizer';
 import { normalizeXArticleStructureAndStyles } from '../x-article/normalizer';
 import { paginateDom, type CardsPaginationOptions } from '../cards';
@@ -35,6 +34,26 @@ export interface SnapshotOptions {
   };
   compileOptions?: CompileOptions;
   cardsOptions?: CardsPaginationOptions;
+}
+
+function restoreBase64Placeholders(node: any, table: string[]): void {
+  if (!node || typeof node !== 'object') return;
+  if (typeof node.value === 'string' && node.value.includes('__MORPH_B64_')) {
+    node.value = node.value.replace(/__MORPH_B64_(\d+)__/g, (_: string, idx: string) => table[Number(idx)]);
+  }
+  if (node.properties && typeof node.properties === 'object') {
+    for (const key of Object.keys(node.properties)) {
+      const val = node.properties[key];
+      if (typeof val === 'string' && val.includes('__MORPH_B64_')) {
+        node.properties[key] = val.replace(/__MORPH_B64_(\d+)__/g, (_: string, idx: string) => table[Number(idx)]);
+      }
+    }
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      restoreBase64Placeholders(child, table);
+    }
+  }
 }
 
 function deepFreeze<T>(obj: T): T {
@@ -92,6 +111,12 @@ export async function buildDeliverySnapshot(
   return finalizeSnapshot(astResult, targetId, capabilities, assetStore, version, options);
 }
 
+const snapshotReferencedAssetIds = new WeakMap<DeliverySnapshot, Set<string>>();
+
+export function getSnapshotReferencedAssetIds(snapshot: DeliverySnapshot): Set<string> | undefined {
+  return snapshotReferencedAssetIds.get(snapshot);
+}
+
 function finalizeSnapshot(
   astResult: { html: string; diagnostics: DiagnosticItem[]; sourceMap: SourceRangeEntry[] },
   targetId: TargetId,
@@ -125,247 +150,264 @@ function finalizeSnapshot(
     });
   }
 
-  // 1. Process inline styles and capabilities guard
+  const referencedAssets = new Set<string>();
+
+  // 1 & 2. Process inline styles, capabilities guard, DOM-based Asset Resolution, and target normalization in a single DOM pass
   const styleResult = inlineStyles(astResult.html, {
     customCss: options.customCss,
     tokens: options.tokens,
     capabilities,
+    afterInline(root, doc, inlineDiagnostics) {
+      const images = Array.from(root.querySelectorAll('img'));
+
+      for (const img of images) {
+        let assetId = img.getAttribute('data-morph-asset-id');
+        const src = img.getAttribute('src') || '';
+
+        if (!assetId && src.startsWith('morph-asset://')) {
+          assetId = src.replace('morph-asset://', '').split('?')[0].split('#')[0];
+        }
+
+        if (assetId) {
+          referencedAssets.add(assetId);
+          const record = assetStore.get(assetId);
+          if (!record) {
+            ready = false;
+            inlineDiagnostics.push({
+              code: 'asset/not-found',
+              message: `Referenced asset "${assetId}" was not found in AssetStore.`,
+              severity: 'error',
+              assetId,
+            });
+            continue;
+          }
+
+          if (record.status !== 'delivery-ready') {
+            ready = false;
+            inlineDiagnostics.push({
+              code: 'asset/not-delivery-ready',
+              message: `Asset "${assetId}" is not delivery ready (current status: ${record.status}).`,
+              severity: 'warning',
+              assetId,
+            });
+          }
+
+          // Determine delivery URL
+          let deliveryUrl: string | undefined;
+
+          if (capabilities.imageTransport === 'remote-https') {
+            if (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl)) {
+              deliveryUrl = record.remoteUrl;
+            } else {
+              ready = false;
+              inlineDiagnostics.push({
+                code: 'snapshot/missing-representation',
+                message: `Asset "${assetId}" lacks a valid remote HTTPS URL required by remote-https transport.`,
+                severity: 'error',
+                assetId,
+              });
+              if (record.dataUrl) {
+                deliveryUrl = record.dataUrl;
+              }
+            }
+          } else if (capabilities.imageTransport === 'platform-upload') {
+            if (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl)) {
+              deliveryUrl = record.remoteUrl;
+            } else {
+              ready = false;
+              inlineDiagnostics.push({
+                code: 'snapshot/missing-representation',
+                message: `Asset "${assetId}" lacks an uploaded remote URL required by platform-upload transport.`,
+                severity: 'error',
+                assetId,
+              });
+              if (record.dataUrl) {
+                deliveryUrl = record.dataUrl;
+              }
+            }
+          } else {
+            // inline-data default
+            if (record.dataUrl) {
+              deliveryUrl = record.dataUrl;
+            } else if (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl)) {
+              deliveryUrl = record.remoteUrl;
+            }
+          }
+
+          if (!deliveryUrl && record.status === 'delivery-ready') {
+            ready = false;
+            inlineDiagnostics.push({
+              code: 'snapshot/missing-representation',
+              message: `Asset "${assetId}" has no deliverable URL representation.`,
+              severity: 'error',
+              assetId,
+            });
+          }
+
+          if (deliveryUrl) {
+            img.setAttribute('src', deliveryUrl);
+            img.setAttribute('data-morph-snapshot-src', deliveryUrl);
+          }
+
+          if (targetId === 'wechat' && record.width && record.width > 0) {
+            if (record.height && record.height > 0) {
+              img.setAttribute('data-ratio', String(Number((record.height / record.width).toFixed(6))));
+            }
+            if (record.width >= 374) {
+              img.setAttribute('data-w', String(Math.max(record.width, 677)));
+              if (capabilities.allowInlineStyles) {
+                const allowed = capabilities.allowedStyleProps;
+                if (!allowed || allowed.has('width')) img.style.setProperty('width', '100%');
+                if (!allowed || allowed.has('height')) img.style.setProperty('height', 'auto');
+                if (!allowed || allowed.has('display')) img.style.setProperty('display', 'block');
+              }
+            } else {
+              img.setAttribute('data-w', String(record.width));
+            }
+          }
+        } else if (targetId === 'wechat' && !img.hasAttribute('data-w')) {
+          img.setAttribute('data-w', '677');
+        }
+      }
+
+      const formulaNodes = Array.from(root.querySelectorAll('[data-morph-asset-id]:not(img)'));
+      for (const node of formulaNodes) {
+        const assetId = node.getAttribute('data-morph-asset-id');
+        if (assetId) {
+          referencedAssets.add(assetId);
+          const record = assetStore.get(assetId);
+          if (!record) {
+            ready = false;
+            inlineDiagnostics.push({
+              code: 'asset/not-found',
+              message: `Referenced formula asset "${assetId}" was not found in AssetStore.`,
+              severity: 'error',
+              assetId,
+            });
+            continue;
+          }
+
+          if (record.status !== 'delivery-ready') {
+            ready = false;
+            inlineDiagnostics.push({
+              code: 'asset/not-delivery-ready',
+              message: `Formula asset "${assetId}" is not delivery ready (current status: ${record.status}).`,
+              severity: 'warning',
+              assetId,
+            });
+          }
+
+          let deliveryUrl: string | undefined;
+          if (capabilities.imageTransport === 'remote-https') {
+            if (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl)) {
+              deliveryUrl = record.remoteUrl;
+            } else {
+              ready = false;
+              inlineDiagnostics.push({
+                code: 'snapshot/missing-representation',
+                message: `Formula asset "${assetId}" lacks a valid remote HTTPS URL required by remote-https transport.`,
+                severity: 'error',
+                assetId,
+              });
+              if (record.dataUrl) deliveryUrl = record.dataUrl;
+            }
+          } else if (capabilities.imageTransport === 'platform-upload') {
+            if (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl)) {
+              deliveryUrl = record.remoteUrl;
+            } else {
+              ready = false;
+              inlineDiagnostics.push({
+                code: 'snapshot/missing-representation',
+                message: `Formula asset "${assetId}" lacks an uploaded remote URL required by platform-upload transport.`,
+                severity: 'error',
+                assetId,
+              });
+              if (record.dataUrl) deliveryUrl = record.dataUrl;
+            }
+          } else {
+            deliveryUrl = record.dataUrl || (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl) ? record.remoteUrl : undefined);
+          }
+
+          if (!deliveryUrl && record.status === 'delivery-ready') {
+            ready = false;
+            inlineDiagnostics.push({
+              code: 'snapshot/missing-representation',
+              message: `Formula asset "${assetId}" has no deliverable URL representation.`,
+              severity: 'error',
+              assetId,
+            });
+          }
+
+          if (deliveryUrl) {
+            const tex = node.getAttribute('data-math-tex') || '';
+            const img = doc.createElement('img');
+            img.setAttribute('src', deliveryUrl);
+            img.setAttribute('alt', tex);
+            if (tex) img.setAttribute('data-math-tex', tex);
+            img.setAttribute('data-morph-snapshot-src', deliveryUrl);
+            img.setAttribute('data-morph-asset-id', assetId);
+            if (targetId === 'wechat') {
+              if (record.width && record.width > 0) {
+                img.setAttribute('data-w', String(record.width >= 374 ? Math.max(record.width, 677) : record.width));
+                if (record.height && record.height > 0) {
+                  img.setAttribute('data-ratio', String(Number((record.height / record.width).toFixed(6))));
+                }
+              } else {
+                img.setAttribute('data-w', '677');
+              }
+            }
+            node.replaceChildren(img);
+          }
+        }
+      }
+
+      if (targetId === 'wechat') {
+        dedupeWeChatNesting(root, inlineDiagnostics);
+      } else if (targetId === 'x-article') {
+        normalizeXArticleStructureAndStyles(root, inlineDiagnostics, capabilities);
+      } else if (targetId === 'cards') {
+        paginateDom(root as HTMLElement, inlineDiagnostics, options.cardsOptions);
+      }
+    },
   });
   allDiagnostics.push(...styleResult.diagnostics);
 
-  // 2. DOM-based Asset Resolution (never search/replace raw HTML string)
-  const { doc, cleanup } = parseDocument(styleResult.html);
-  const root = doc.querySelector('.morph-doc') || doc.body;
+  const finalHtml = styleResult.html;
 
-  try {
-    const images = Array.from(root.querySelectorAll('img'));
+  // 3. Lazily derive and freeze HAST from final HTML on first access
+  let cachedDerivedHast: any = null;
+  const frozenVersion = Object.freeze({ doc: version.doc, style: version.style, assets: version.assets });
+  const frozenDiagnostics = Object.freeze(allDiagnostics.map((d) => deepFreeze({ ...d })));
+  const frozenSourceMap = Object.freeze(astResult.sourceMap.map((entry) => Object.freeze({ ...entry })));
 
-    for (const img of images) {
-      let assetId = img.getAttribute('data-morph-asset-id');
-      const src = img.getAttribute('src') || '';
-
-      if (!assetId && src.startsWith('morph-asset://')) {
-        assetId = src.replace('morph-asset://', '').split('?')[0].split('#')[0];
+  const snapshot = {
+    version: frozenVersion,
+    targetId,
+    ready,
+    get hast() {
+      if (!cachedDerivedHast) {
+        const base64Table: string[] = [];
+        const htmlForHast = finalHtml.includes('data:image/')
+          ? finalHtml.replace(/data:image\/[^"'\s]{256,}/g, (match) => {
+              const idx = base64Table.length;
+              base64Table.push(match);
+              return `__MORPH_B64_${idx}__`;
+            })
+          : finalHtml;
+        const derived = fromHtml(htmlForHast, { fragment: true });
+        if (base64Table.length > 0) {
+          restoreBase64Placeholders(derived, base64Table);
+        }
+        cachedDerivedHast = deepFreeze(derived);
       }
+      return cachedDerivedHast;
+    },
+    html: finalHtml,
+    diagnostics: frozenDiagnostics,
+    sourceMap: frozenSourceMap,
+  } as DeliverySnapshot;
 
-      if (assetId) {
-        const record = assetStore.get(assetId);
-        if (!record) {
-          ready = false;
-          allDiagnostics.push({
-            code: 'asset/not-found',
-            message: `Referenced asset "${assetId}" was not found in AssetStore.`,
-            severity: 'error',
-            assetId,
-          });
-          continue;
-        }
-
-        if (record.status !== 'delivery-ready') {
-          ready = false;
-          allDiagnostics.push({
-            code: 'asset/not-delivery-ready',
-            message: `Asset "${assetId}" is not delivery ready (current status: ${record.status}).`,
-            severity: 'warning',
-            assetId,
-          });
-        }
-
-        // Determine delivery URL
-        let deliveryUrl: string | undefined;
-
-        if (capabilities.imageTransport === 'remote-https') {
-          if (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl)) {
-            deliveryUrl = record.remoteUrl;
-          } else {
-            ready = false;
-            allDiagnostics.push({
-              code: 'snapshot/missing-representation',
-              message: `Asset "${assetId}" lacks a valid remote HTTPS URL required by remote-https transport.`,
-              severity: 'error',
-              assetId,
-            });
-            if (record.dataUrl) {
-              deliveryUrl = record.dataUrl;
-            }
-          }
-        } else if (capabilities.imageTransport === 'platform-upload') {
-          if (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl)) {
-            deliveryUrl = record.remoteUrl;
-          } else {
-            ready = false;
-            allDiagnostics.push({
-              code: 'snapshot/missing-representation',
-              message: `Asset "${assetId}" lacks an uploaded remote URL required by platform-upload transport.`,
-              severity: 'error',
-              assetId,
-            });
-            if (record.dataUrl) {
-              deliveryUrl = record.dataUrl;
-            }
-          }
-        } else {
-          // inline-data default
-          if (record.dataUrl) {
-            deliveryUrl = record.dataUrl;
-          } else if (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl)) {
-            deliveryUrl = record.remoteUrl;
-          }
-        }
-
-        if (!deliveryUrl && record.status === 'delivery-ready') {
-          ready = false;
-          allDiagnostics.push({
-            code: 'snapshot/missing-representation',
-            message: `Asset "${assetId}" has no deliverable URL representation.`,
-            severity: 'error',
-            assetId,
-          });
-        }
-
-        if (deliveryUrl) {
-          img.setAttribute('src', deliveryUrl);
-          img.setAttribute('data-morph-snapshot-src', deliveryUrl);
-        }
-
-        if (targetId === 'wechat' && record.width && record.width > 0) {
-          if (record.height && record.height > 0) {
-            img.setAttribute('data-ratio', String(Number((record.height / record.width).toFixed(6))));
-          }
-          if (record.width >= 374) {
-            img.setAttribute('data-w', String(Math.max(record.width, 677)));
-            if (capabilities.allowInlineStyles) {
-              const allowed = capabilities.allowedStyleProps;
-              if (!allowed || allowed.has('width')) img.style.setProperty('width', '100%');
-              if (!allowed || allowed.has('height')) img.style.setProperty('height', 'auto');
-              if (!allowed || allowed.has('display')) img.style.setProperty('display', 'block');
-            }
-          } else {
-            img.setAttribute('data-w', String(record.width));
-          }
-        }
-      } else if (targetId === 'wechat' && !img.hasAttribute('data-w')) {
-        img.setAttribute('data-w', '677');
-      }
-    }
-
-    const formulaNodes = Array.from(root.querySelectorAll('[data-morph-asset-id]:not(img)'));
-    for (const node of formulaNodes) {
-      const assetId = node.getAttribute('data-morph-asset-id');
-      if (assetId) {
-        const record = assetStore.get(assetId);
-        if (!record) {
-          ready = false;
-          allDiagnostics.push({
-            code: 'asset/not-found',
-            message: `Referenced formula asset "${assetId}" was not found in AssetStore.`,
-            severity: 'error',
-            assetId,
-          });
-          continue;
-        }
-
-        if (record.status !== 'delivery-ready') {
-          ready = false;
-          allDiagnostics.push({
-            code: 'asset/not-delivery-ready',
-            message: `Formula asset "${assetId}" is not delivery ready (current status: ${record.status}).`,
-            severity: 'warning',
-            assetId,
-          });
-        }
-
-        let deliveryUrl: string | undefined;
-        if (capabilities.imageTransport === 'remote-https') {
-          if (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl)) {
-            deliveryUrl = record.remoteUrl;
-          } else {
-            ready = false;
-            allDiagnostics.push({
-              code: 'snapshot/missing-representation',
-              message: `Formula asset "${assetId}" lacks a valid remote HTTPS URL required by remote-https transport.`,
-              severity: 'error',
-              assetId,
-            });
-            if (record.dataUrl) deliveryUrl = record.dataUrl;
-          }
-        } else if (capabilities.imageTransport === 'platform-upload') {
-          if (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl)) {
-            deliveryUrl = record.remoteUrl;
-          } else {
-            ready = false;
-            allDiagnostics.push({
-              code: 'snapshot/missing-representation',
-              message: `Formula asset "${assetId}" lacks an uploaded remote URL required by platform-upload transport.`,
-              severity: 'error',
-              assetId,
-            });
-            if (record.dataUrl) deliveryUrl = record.dataUrl;
-          }
-        } else {
-          deliveryUrl = record.dataUrl || (record.remoteUrl && isValidRemoteHttpsUrl(record.remoteUrl) ? record.remoteUrl : undefined);
-        }
-
-        if (!deliveryUrl && record.status === 'delivery-ready') {
-          ready = false;
-          allDiagnostics.push({
-            code: 'snapshot/missing-representation',
-            message: `Formula asset "${assetId}" has no deliverable URL representation.`,
-            severity: 'error',
-            assetId,
-          });
-        }
-
-        if (deliveryUrl) {
-          const tex = node.getAttribute('data-math-tex') || '';
-          const img = doc.createElement('img');
-          img.setAttribute('src', deliveryUrl);
-          img.setAttribute('alt', tex);
-          if (tex) img.setAttribute('data-math-tex', tex);
-          img.setAttribute('data-morph-snapshot-src', deliveryUrl);
-          img.setAttribute('data-morph-asset-id', assetId);
-          if (targetId === 'wechat') {
-            if (record.width && record.width > 0) {
-              img.setAttribute('data-w', String(record.width >= 374 ? Math.max(record.width, 677) : record.width));
-              if (record.height && record.height > 0) {
-                img.setAttribute('data-ratio', String(Number((record.height / record.width).toFixed(6))));
-              }
-            } else {
-              img.setAttribute('data-w', '677');
-            }
-          }
-          node.replaceChildren(img);
-        }
-      }
-    }
-
-    if (targetId === 'wechat') {
-      dedupeWeChatNesting(root, allDiagnostics);
-    } else if (targetId === 'x-article') {
-      normalizeXArticleStructureAndStyles(root, allDiagnostics, capabilities);
-    } else if (targetId === 'cards') {
-      paginateDom(root as HTMLElement, allDiagnostics, options.cardsOptions);
-    }
-
-    const finalHtml = (root.parentElement && root.parentElement.tagName.toLowerCase() !== 'body')
-      ? root.outerHTML
-      : root.outerHTML;
-
-    // 3. Derive HAST from final HTML so HAST and HTML describe the exact same styled state
-    const derivedHast = fromHtml(finalHtml, { fragment: true });
-
-    const snapshot: DeliverySnapshot = {
-      version: { doc: version.doc, style: version.style, assets: version.assets },
-      targetId,
-      ready,
-      hast: derivedHast,
-      html: finalHtml,
-      diagnostics: allDiagnostics,
-      sourceMap: astResult.sourceMap.map((entry) => ({ ...entry })),
-    };
-
-    return deepFreeze(snapshot);
-  } finally {
-    cleanup();
-  }
+  Object.freeze(snapshot);
+  snapshotReferencedAssetIds.set(snapshot, referencedAssets);
+  return snapshot;
 }

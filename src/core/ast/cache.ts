@@ -48,7 +48,7 @@ export class HeavyBlockCache {
   private misses = 0;
   private maxEntries: number;
 
-  constructor(maxEntries = 500) {
+  constructor(maxEntries = 4096) {
     this.maxEntries = maxEntries;
   }
 
