@@ -4,6 +4,11 @@ import {
   AssetStore,
   buildDeliverySnapshot,
 } from '../src/index';
+import {
+  buildDefaultShowcaseMarkdown,
+  DEFAULT_SAVED_CSS_PRESETS,
+  THEME_PRESETS,
+} from '../src/ui/presets';
 import { decodeBitmapDataUrl, png } from './support/fixtures';
 import {
   createWeChatVerificationSession,
@@ -639,6 +644,203 @@ describe('TestWeChatPipeline', () => {
       expect(inspect.pureBgStyle).toContain('linear-gradient');
       // 3. 100% 通过官方 mp-darkmode 深色模式校验（消除低对比度、文字渐变与白名单属性违规）
       expect(verifyResult).toEqual({ isValid: true, inValidInfo: {} });
+    } finally {
+      assetStore.clear();
+    }
+  });
+
+  // =========================================================================
+  // 维度 7：学术三线表边框、固定列宽与块级垂直间距在微信宿主样式及 BFC 下的所见即所得一致性
+  // =========================================================================
+  it('test_wechat_academic_three_line_table_and_block_spacing_maintain_wysiwyg_under_host_stylesheet_and_bfc', async () => {
+    const assetStore = new AssetStore();
+    const coverRecord = await assetStore.ingest(png(1, 360, 160), { fileName: 'cover-1.png' });
+    const markdown = buildDefaultShowcaseMarkdown(coverRecord.uri);
+
+    const snapshot = await buildDeliverySnapshot(markdown, 'wechat', assetStore, {
+      customCss: THEME_PRESETS.default.presetCss,
+      tokens: THEME_PRESETS.default.tokens,
+    });
+
+    try {
+      const verifyResult = await verifier.verifyHtml(snapshot.html);
+      expect(verifyResult).toEqual({ isValid: true, inValidInfo: {} });
+
+      const metrics = await page.evaluate((html) => {
+        document.body.innerHTML = `
+          <style>
+            body { margin: 0; padding: 0; }
+            .stage-row { display: flex; gap: 20px; align-items: flex-start; }
+            .box { width: 585px; box-sizing: border-box; }
+            #wechat-host-box table { table-layout: fixed; width: 100%; }
+            #wechat-host-box table, #wechat-host-box th, #wechat-host-box td { border: 1px solid #d9d9d9; }
+            #wechat-host-box .morph-doc { display: flex; flex-direction: column; }
+          </style>
+          <div class="stage-row">
+            <div id="preview-box" class="box">${html}</div>
+            <div id="wechat-host-box" class="box">${html}</div>
+          </div>
+        `;
+
+        const collectBoxMetrics = (boxId: string) => {
+          const root = document.getElementById(boxId)!;
+          const table = root.querySelector('table.morph-table') as HTMLElement;
+          const prevEl = table.previousElementSibling as HTMLElement;
+          const ths = Array.from(table.querySelectorAll('th')) as HTMLElement[];
+          const tds = Array.from(table.querySelectorAll('td')) as HTMLElement[];
+          const trs = Array.from(table.querySelectorAll('tr')) as HTMLElement[];
+
+          const tableCS = window.getComputedStyle(table);
+          const thBorders = ths.map((th) => {
+            const cs = window.getComputedStyle(th);
+            return {
+              top: cs.borderTopWidth,
+              left: cs.borderLeftWidth,
+              right: cs.borderRightWidth,
+              bottom: cs.borderBottomWidth,
+              width: th.getBoundingClientRect().width,
+            };
+          });
+          const tdBorders = tds.map((td) => {
+            const cs = window.getComputedStyle(td);
+            return {
+              top: cs.borderTopWidth,
+              left: cs.borderLeftWidth,
+              right: cs.borderRightWidth,
+              bottom: cs.borderBottomWidth,
+            };
+          });
+          const rowHeights = trs.map((tr) => tr.getBoundingClientRect().height);
+          const gapBeforeTable =
+            table.getBoundingClientRect().top - prevEl.getBoundingClientRect().bottom;
+
+          return {
+            tableLayout: tableCS.tableLayout,
+            thBorders,
+            tdBorders,
+            rowHeights,
+            gapBeforeTable,
+          };
+        };
+
+        return {
+          preview: collectBoxMetrics('preview-box'),
+          host: collectBoxMetrics('wechat-host-box'),
+        };
+      }, snapshot.html);
+
+      // a) In wechat-host-box, computed borders on th and td must have 0px top/left/right and 2px/1px bottom
+      for (const thB of metrics.host.thBorders) {
+        expect(thB.top).toBe('0px');
+        expect(thB.left).toBe('0px');
+        expect(thB.right).toBe('0px');
+        expect(thB.bottom).toBe('2px');
+      }
+      for (const tdB of metrics.host.tdBorders) {
+        expect(tdB.top).toBe('0px');
+        expect(tdB.left).toBe('0px');
+        expect(tdB.right).toBe('0px');
+        expect(tdB.bottom).toBe('1px');
+      }
+
+      // b) Both containers use fixed table layout, equal 4-column widths, and matching column widths
+      expect(metrics.preview.tableLayout).toBe('fixed');
+      expect(metrics.host.tableLayout).toBe('fixed');
+      expect(metrics.preview.thBorders).toHaveLength(4);
+      expect(metrics.host.thBorders).toHaveLength(4);
+
+      const firstPreviewColW = metrics.preview.thBorders[0].width;
+      for (let i = 0; i < 4; i++) {
+        expect(Math.abs(metrics.preview.thBorders[i].width - firstPreviewColW)).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(metrics.preview.thBorders[i].width - metrics.host.thBorders[i].width)
+        ).toBeLessThanOrEqual(1);
+      }
+
+      // c) Vertical gap before table is identical between preview and non-collapsing host BFC, and <= 24px
+      expect(metrics.preview.gapBeforeTable).toBeLessThanOrEqual(24);
+      expect(metrics.host.gapBeforeTable).toBeLessThanOrEqual(24);
+      expect(
+        Math.abs(metrics.preview.gapBeforeTable - metrics.host.gapBeforeTable)
+      ).toBeLessThanOrEqual(1);
+
+      // d) Every table row height in preview matches wechat-host-box within 1px
+      expect(metrics.preview.rowHeights.length).toBe(metrics.host.rowHeights.length);
+      for (let i = 0; i < metrics.preview.rowHeights.length; i++) {
+        expect(
+          Math.abs(metrics.preview.rowHeights[i] - metrics.host.rowHeights[i])
+        ).toBeLessThanOrEqual(1);
+      }
+
+      // e) Also verify the Yoryon preset passes official verifier and preserves WYSIWYG table & spacing
+      const yoryonPreset = DEFAULT_SAVED_CSS_PRESETS.find((p) => p.id === 'yoryon');
+      expect(yoryonPreset).toBeDefined();
+
+      const yoryonSnap = await buildDeliverySnapshot(markdown, 'wechat', assetStore, {
+        customCss: yoryonPreset!.css,
+        tokens: THEME_PRESETS.default.tokens,
+      });
+      const yoryonVerify = await verifier.verifyHtml(yoryonSnap.html);
+      expect(yoryonVerify).toEqual({ isValid: true, inValidInfo: {} });
+
+      const yoryonMetrics = await page.evaluate((html) => {
+        document.body.innerHTML = `
+          <style>
+            body { margin: 0; padding: 0; }
+            .stage-row { display: flex; gap: 20px; align-items: flex-start; }
+            .box { width: 585px; box-sizing: border-box; }
+            #wechat-host-box table { table-layout: fixed; width: 100%; }
+            #wechat-host-box table, #wechat-host-box th, #wechat-host-box td { border: 1px solid #d9d9d9; }
+            #wechat-host-box .morph-doc { display: flex; flex-direction: column; }
+          </style>
+          <div class="stage-row">
+            <div id="preview-box" class="box">${html}</div>
+            <div id="wechat-host-box" class="box">${html}</div>
+          </div>
+        `;
+        const root = document.getElementById('wechat-host-box')!;
+        const table = root.querySelector('table.morph-table') as HTMLElement;
+        const prevEl = table.previousElementSibling as HTMLElement;
+        const ths = Array.from(table.querySelectorAll('th')) as HTMLElement[];
+        const tds = Array.from(table.querySelectorAll('td')) as HTMLElement[];
+        return {
+          tableLayout: window.getComputedStyle(table).tableLayout,
+          gapBeforeTable: table.getBoundingClientRect().top - prevEl.getBoundingClientRect().bottom,
+          thBorders: ths.map((th) => {
+            const cs = window.getComputedStyle(th);
+            return {
+              top: cs.borderTopWidth,
+              left: cs.borderLeftWidth,
+              right: cs.borderRightWidth,
+              bottom: cs.borderBottomWidth,
+            };
+          }),
+          tdBorders: tds.map((td) => {
+            const cs = window.getComputedStyle(td);
+            return {
+              top: cs.borderTopWidth,
+              left: cs.borderLeftWidth,
+              right: cs.borderRightWidth,
+              bottom: cs.borderBottomWidth,
+            };
+          }),
+        };
+      }, yoryonSnap.html);
+
+      expect(yoryonMetrics.tableLayout).toBe('fixed');
+      expect(yoryonMetrics.gapBeforeTable).toBeLessThanOrEqual(24);
+      for (const thB of yoryonMetrics.thBorders) {
+        expect(thB.top).toBe('0px');
+        expect(thB.left).toBe('0px');
+        expect(thB.right).toBe('0px');
+        expect(thB.bottom).toBe('2px');
+      }
+      for (const tdB of yoryonMetrics.tdBorders) {
+        expect(tdB.top).toBe('0px');
+        expect(tdB.left).toBe('0px');
+        expect(tdB.right).toBe('0px');
+        expect(tdB.bottom).toBe('1px');
+      }
     } finally {
       assetStore.clear();
     }

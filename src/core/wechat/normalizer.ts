@@ -1,4 +1,99 @@
+import './mathjax-env';
+import { HTMLHandler } from 'mathjax-full/js/handlers/html/HTMLHandler.js';
+import { TeX } from 'mathjax-full/js/input/tex.js';
+import { SVG } from 'mathjax-full/js/output/svg.js';
+import { liteAdaptor } from 'mathjax-full/js/adaptors/liteAdaptor.js';
+import { AllPackages } from 'mathjax-full/js/input/tex/AllPackages.js';
 import type { DiagnosticItem } from '../snapshot/types';
+
+let mjAdaptor: any = null;
+let mjDocument: any = null;
+const wechatMathSvgCache = new Map<string, string>();
+const MAX_WECHAT_MATH_SVG_CACHE = 512;
+
+function getMathJaxDocument(): { adaptor: any; doc: any } {
+  if (!mjDocument || !mjAdaptor) {
+    mjAdaptor = liteAdaptor();
+    const handler = new HTMLHandler(mjAdaptor);
+    const texInput = new TeX({ packages: AllPackages });
+    const svgOutput = new SVG({ fontCache: 'none' });
+    mjDocument = handler.create('', { InputJax: texInput, OutputJax: svgOutput });
+  }
+  return { adaptor: mjAdaptor, doc: mjDocument };
+}
+
+function flattenLiteSvgNode(node: any): void {
+  if (!node || typeof node !== 'object' || !Array.isArray(node.children)) return;
+  for (let i = 0; i < node.children.length; i++) {
+    flattenLiteSvgNode(node.children[i]);
+  }
+  const newChildren: any[] = [];
+  for (const child of node.children) {
+    if (child && child.kind === 'g') {
+      const attrs = child.attributes || {};
+      delete attrs['data-mml-node'];
+      delete attrs['data-mjx-texclass'];
+      delete attrs['data-c'];
+      const keys = Object.keys(attrs);
+      if (keys.length === 0 && Array.isArray(child.children)) {
+        newChildren.push(...child.children);
+        continue;
+      }
+    } else if (child && child.attributes) {
+      delete child.attributes['data-mml-node'];
+      delete child.attributes['data-mjx-texclass'];
+      delete child.attributes['data-c'];
+    }
+    newChildren.push(child);
+  }
+  node.children = newChildren;
+}
+
+function renderTexToWeChatSvg(rawTex: string, displayMode: boolean): string | null {
+  const tex = rawTex.trim();
+  if (!tex) return null;
+  const cacheKey = `${displayMode ? '1' : '0'}:${tex}`;
+  const cached = wechatMathSvgCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    const { adaptor, doc } = getMathJaxDocument();
+    const container = doc.convert(tex, { display: displayMode });
+    flattenLiteSvgNode(container);
+    const svgNode = container?.children?.[0];
+    if (!svgNode || svgNode.kind !== 'svg') return null;
+
+    const attrs = svgNode.attributes || (svgNode.attributes = {});
+    const w = attrs.width || '';
+    const h = attrs.height || '';
+    const existingStyle = attrs.style || '';
+    delete attrs.role;
+    delete attrs.focusable;
+    const blockCenterStyle = displayMode
+      ? ' display: block; margin-top: 0px; margin-bottom: 0px; margin-left: auto; margin-right: auto;'
+      : '';
+    attrs.style = `${existingStyle}${blockCenterStyle}${w ? ` width: ${w};` : ''}${h ? ` height: ${h};` : ''} max-width: 100%;`.trim();
+
+    const firstG = Array.isArray(svgNode.children)
+      ? svgNode.children.find((c: any) => c && c.kind === 'g')
+      : null;
+    if (firstG) {
+      const gAttrs = firstG.attributes || (firstG.attributes = {});
+      gAttrs.fill = 'currentColor';
+      gAttrs.stroke = 'currentColor';
+    }
+
+    const svgHtml = adaptor.innerHTML(container);
+    if (wechatMathSvgCache.size >= MAX_WECHAT_MATH_SVG_CACHE) {
+      const oldestKey = wechatMathSvgCache.keys().next().value;
+      if (oldestKey !== undefined) wechatMathSvgCache.delete(oldestKey);
+    }
+    wechatMathSvgCache.set(cacheKey, svgHtml);
+    return svgHtml;
+  } catch {
+    return null;
+  }
+}
 
 const BLOCK_ELEMENT_SELECTOR = 'section, div, p, h1, h2, h3, h4, h5, h6, ul, ol, li, table, blockquote, pre';
 const DISALLOWED_NODELEAF_CHILD_TAGS = new Set([
@@ -416,6 +511,61 @@ export function normalizeWeChatStructureAndStyles(
 ): void {
   const canSetProp = (prop: string) => !allowedStyleProps || allowedStyleProps.has(prop);
 
+  // 0.1 Wrap consecutive inline children of <li> inside <section> so WeChat ProseMirror
+  // does not split bold leads (e.g. <li><strong>Title</strong>：Body</li>) onto separate lines
+  rootContainer.querySelectorAll('li').forEach((li) => {
+    const doc = li.ownerDocument;
+    if (!doc) return;
+    let currentSection: HTMLElement | null = null;
+    const childNodes = Array.from(li.childNodes);
+    for (const node of childNodes) {
+      const isBlockEl =
+        node.nodeType === 1 &&
+        /^(?:section|p|div|ul|ol|blockquote|pre|table|h[1-6]|figure|hr)$/i.test(
+          (node as Element).tagName
+        );
+      if (isBlockEl) {
+        currentSection = null;
+        continue;
+      }
+      if (!currentSection) {
+        if (node.nodeType === 3 && !(node.textContent || '').trim()) {
+          continue;
+        }
+        currentSection = doc.createElement('section');
+        li.insertBefore(currentSection, node);
+      }
+      currentSection.appendChild(node);
+    }
+  });
+
+  // 0.2 Render math formulas ([data-math-tex]) to WeChat-compatible vector <svg>
+  // to avoid ProseMirror stripping <math> and dumping raw <annotation> LaTeX text
+  rootContainer
+    .querySelectorAll<HTMLElement>('[data-math-tex]:not([data-morph-asset-id]):not(img)')
+    .forEach((mathEl) => {
+      const tex = mathEl.getAttribute('data-math-tex') || '';
+      const isDisplay =
+        mathEl.classList.contains('morph-math-display') ||
+        mathEl.tagName.toLowerCase() === 'div' ||
+        mathEl.tagName.toLowerCase() === 'section';
+      const svgHtml = renderTexToWeChatSvg(tex, isDisplay);
+      if (svgHtml) {
+        mathEl.innerHTML = svgHtml;
+        if (isDisplay) {
+          if (canSetProp('display')) mathEl.style.setProperty('display', 'block');
+          if (canSetProp('text-align')) mathEl.style.setProperty('text-align', 'center');
+          if (canSetProp('margin-top') && !mathEl.style.getPropertyValue('margin-top')) {
+            mathEl.style.setProperty('margin-top', '0px');
+          }
+          if (canSetProp('margin-bottom') && !mathEl.style.getPropertyValue('margin-bottom')) {
+            mathEl.style.setProperty('margin-bottom', '20px');
+          }
+          if (canSetProp('overflow-x')) mathEl.style.setProperty('overflow-x', 'auto');
+        }
+      }
+    });
+
   // 1. Structure Rule #2.2: span[leaf] must not wrap block-level elements (or be left empty after HTML5 block-in-p splitting)
   rootContainer.querySelectorAll('span[leaf]').forEach((span) => {
     if (span.querySelector(BLOCK_ELEMENT_SELECTOR) || span.childNodes.length === 0) {
@@ -663,13 +813,17 @@ export function normalizeWeChatStructureAndStyles(
       }
     }
 
-    // #3 font-family: ensure WeChat-compatible system font prefix
+    // #3 font-family: ensure WeChat-compatible system font prefix unless it is a recognized editorial/code stack
     if (rawStyleLower.includes('font-family')) {
       const ff = style.getPropertyValue('font-family').trim();
       if (ff) {
         const normalizedFf = ff.replace(/["']/g, '').replace(/\s+/g, ' ').trim();
         const wechatFontPrefix = 'mp-quote, PingFang SC, system-ui, -apple-system';
-        if (!normalizedFf.startsWith(wechatFontPrefix)) {
+        const isRecognizedEditorialOrCodeFont =
+          /\b(?:Newsreader|Iowan Old Style|Palatino|Noto Serif SC|Songti SC|STSong|Source Serif 4|Georgia|Inter|PingFang SC|JetBrains Mono|SF Mono|SFMono-Regular|Consolas|Liberation Mono|Menlo|Fira Code|ui-monospace|monospace)\b/i.test(
+            normalizedFf
+          );
+        if (!normalizedFf.startsWith(wechatFontPrefix) && !isRecognizedEditorialOrCodeFont) {
           if (canSetProp('font-family')) {
             style.setProperty('font-family', `"mp-quote", PingFang SC, system-ui, -apple-system, ${ff}`);
           } else {

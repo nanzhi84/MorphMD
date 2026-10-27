@@ -252,28 +252,29 @@ describe('TestWorkbenchLayoutAndTheme', () => {
     expect(previewStage.querySelector('.morph-doc')).not.toBeNull();
   });
 
-  it('test_notion_charcoal_palette_excludes_purple_swatches_and_exposes_charcoal_primary_swatch', async () => {
+  it('test_style_drawer_omits_tabs_and_renders_only_custom_css_panel_with_single_anthropic_preset', async () => {
     const { container } = await mountWorkbench();
 
-    const themeTab = container.querySelector<HTMLElement>('[data-testid="style-tab-theme"]');
-    if (themeTab) {
-      await clickTestId(container, 'style-tab-theme');
-    }
+    expect(container.querySelector('[data-testid="style-tab-theme"]')).toBeNull();
+    expect(container.querySelector('[data-testid="style-tab-typography"]')).toBeNull();
+    expect(container.querySelector('[data-testid="style-tab-css"]')).toBeNull();
+    expect(container.querySelector('[data-testid="style-panel-theme"]')).toBeNull();
+    expect(container.querySelector('[data-testid="style-panel-typography"]')).toBeNull();
 
-    const charcoalSwatch = getByTestId(container, 'accent-swatch-#37352f');
-    expect(charcoalSwatch).toBeTruthy();
-    expect(container.querySelector('[data-testid="accent-swatch-#6657dc"]')).toBeNull();
+    const cssPanel = getByTestId(container, 'style-panel-css');
+    expect(cssPanel.hidden).toBe(false);
+    expect(cssPanel.getAttribute('aria-hidden')).not.toBe('true');
+    expect(cssPanel.getAttribute('data-view-mode')).toBe('list');
 
-    const swatches = Array.from(
-      container.querySelectorAll<HTMLElement>('[data-testid^="accent-swatch-"]')
+    const presetItems = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-testid^="css-preset-item-"]')
     );
-    expect(swatches.length).toBeGreaterThanOrEqual(4);
-    for (const swatch of swatches) {
-      const id = (swatch.getAttribute('data-testid') || '').toLowerCase();
-      expect(id).not.toContain('6657dc');
-      expect(id).not.toContain('7c3aed');
-      expect(id).not.toContain('8b5cf6');
-    }
+    expect(presetItems).toHaveLength(2);
+    expect(getByTestId(container, 'css-preset-item-default')).toBeTruthy();
+    expect(getByTestId(container, 'css-preset-item-yoryon')).toBeTruthy();
+    expect(container.querySelector('[data-testid="css-preset-item-reading"]')).toBeNull();
+    expect(container.querySelector('[data-testid="css-preset-item-minimal"]')).toBeNull();
+    expect(container.querySelector('[data-testid="css-preset-item-editorial"]')).toBeNull();
   });
 
   it('test_toggle_and_close_style_drawer_buttons_control_right_drawer_visibility', async () => {
@@ -554,53 +555,182 @@ describe('TestEditorInputToolbarAndAssetPaste', () => {
 });
 
 describe('TestStyleDrawerCustomization', () => {
-  it('test_selecting_theme_presets_and_accent_color_updates_compiled_preview_styles', async () => {
+  it('test_default_anthropic_editorial_preset_applies_warm_paper_serif_headings_italic_quote_and_academic_table', async () => {
+    const store = assetStore();
+    const cover = await store.ingest(png(5, 24, 16), { fileName: 'editorial-cover.png' });
+    const markdown = [
+      '# 一级社论标题',
+      '',
+      '## 二级章节标题',
+      '',
+      '### 三级小节标题',
+      '',
+      '#### 四级无衬线小标题',
+      '',
+      '正文包含 *强调文本*、`inline_token` 与 [Anthropic Research](https://anthropic.com)。',
+      '',
+      '> 学术与社论风正体衬线引文，左侧赤陶色竖线装饰。',
+      '',
+      '> [!TIP] 样式内联提示',
+      '> 提示正文段落。',
+      '',
+      '```ts',
+      'const model = "claude";',
+      '```',
+      '',
+      '| 评估维度 | 基准得分 |',
+      '| :--- | :--- |',
+      '| 排版还原度 | 99.8% |',
+      '',
+      '---',
+      '',
+      `![社论配图](${cover.uri})`,
+    ].join('\n');
+
     const { container } = await mountWorkbench({
-      initialMarkdown: '# 主题定制标题\n\n> 引用块样式验证\n\n正文包含 **重点强调** 文字。',
+      assetStore: store,
+      initialMarkdown: markdown,
     });
-
-    const themeTab = container.querySelector<HTMLElement>('[data-testid="style-tab-theme"]');
-    if (themeTab) {
-      await clickTestId(container, 'style-tab-theme');
-    }
-
-    const previewStage = getByTestId(container, 'preview-stage');
-    const beforePresetHtml = previewStage.innerHTML;
-
-    await clickTestId(container, 'preset-card-magazine');
-    expect(previewStage.innerHTML).not.toBe(beforePresetHtml);
-
-    await setControlValue(container, 'accent-hex-input', '#0f7b6c');
-    const normalizedHtml = previewStage.innerHTML.toLowerCase();
-    expect(
-      normalizedHtml.includes('#0f7b6c') || normalizedHtml.includes('rgb(15, 123, 108)')
-    ).toBe(true);
-  });
-
-  it('test_updating_typography_size_and_line_height_controls_updates_preview_inline_styles', async () => {
-    const { container } = await mountWorkbench({
-      initialMarkdown: '# 排版参数调节\n\n用于验证正文字号与行高实时内联。',
-    });
-
-    const typographyTab = container.querySelector<HTMLElement>(
-      '[data-testid="style-tab-typography"]'
-    );
-    if (typographyTab) {
-      await clickTestId(container, 'style-tab-typography');
-    }
-
-    await setControlValue(container, 'body-size-input', '18px');
-    await setControlValue(container, 'line-height-input', '1.9');
 
     const previewStage = getByTestId(container, 'preview-stage');
     const docEl = previewStage.querySelector<HTMLElement>('.morph-doc');
-    const pEl = previewStage.querySelector<HTMLElement>('.morph-p, p');
     expect(docEl).not.toBeNull();
-    expect(docEl!.style.fontSize).toBe('18px');
-    expect(pEl?.style.lineHeight || docEl!.style.lineHeight).toBe('1.9');
+    // 1. No local #FAF8F5 background box on .morph-doc
+    expect(docEl!.style.backgroundColor.toLowerCase()).not.toMatch(
+      /#faf8f5|rgb\(250,\s*248,\s*245\)/
+    );
+    expect(['', 'transparent', '#ffffff', 'rgb(255, 255, 255)']).toContain(
+      docEl!.style.backgroundColor.toLowerCase()
+    );
+    expect(docEl!.style.color.toLowerCase()).toMatch(/#1f1e1d|rgb\(31,\s*30,\s*29\)/);
+    expect(docEl!.style.fontSize).toBe('16px');
+    expect(docEl!.style.lineHeight).toBe('1.8');
+    expect(docEl!.style.letterSpacing).toBe('0.01em');
+    expect(docEl!.style.fontFamily.replace(/^["']|["']$/g, '')).toMatch(/^Inter\b/);
+
+    // 2. Chinese & English Typography Hierarchy (h1, h2, h3, em, blockquote)
+    const h1 = previewStage.querySelector<HTMLElement>('h1.morph-h1');
+    const h2 = previewStage.querySelector<HTMLElement>('h2.morph-h2');
+    const h3 = previewStage.querySelector<HTMLElement>('h3.morph-h3');
+    expect(h1).not.toBeNull();
+    expect(h2).not.toBeNull();
+    expect(h3).not.toBeNull();
+
+    expect(h1!.style.fontFamily).toContain('Newsreader');
+    expect(h1!.style.fontFamily).toContain('Noto Serif SC');
+    expect(h1!.style.fontFamily.replace(/^["']|["']$/g, '')).toMatch(/^Newsreader\b/);
+    expect(h1!.style.fontSize).toBe('36px');
+    expect(h1!.style.lineHeight).toBe('1.3');
+    expect(h1!.style.fontWeight).toBe('500');
+    expect(h1!.style.letterSpacing).toBe('-0.01em');
+    expect(h1!.style.color.toLowerCase()).toMatch(/#141413|rgb\(20,\s*20,\s*19\)/);
+
+    expect(h2!.style.fontFamily).toContain('Newsreader');
+    expect(h2!.style.fontFamily).toContain('Noto Serif SC');
+    expect(h2!.style.fontSize).toBe('24px');
+    expect(h2!.style.lineHeight).toBe('1.4');
+    expect(h2!.style.fontWeight).toBe('500');
+    expect(h2!.style.letterSpacing).toBe('-0.01em');
+
+    expect(h3!.style.fontFamily).toContain('Inter');
+    expect(h3!.style.fontSize).toBe('18px');
+    expect(h3!.style.lineHeight).toBe('1.5');
+    expect(h3!.style.fontWeight).toBe('600');
+
+    const em = previewStage.querySelector<HTMLElement>('p em');
+    expect(em).not.toBeNull();
+    expect(em!.style.fontStyle).toBe('normal');
+    expect(em!.style.fontFamily).toContain('Newsreader');
+    expect(em!.style.fontFamily).toContain('Noto Serif SC');
+    expect(['', 'none']).toContain(em!.style.borderBottom || em!.style.borderBottomStyle || '');
+    expect(em!.style.color.toLowerCase()).toMatch(/#c86446|rgb\(200,\s*100,\s*70\)/);
+
+    const link = previewStage.querySelector<HTMLElement>('p a');
+    expect(link).not.toBeNull();
+    expect(link!.style.textDecoration).toBe('none');
+    expect((link!.style.borderBottom || link!.style.borderBottomColor).toLowerCase()).toMatch(
+      /#c86446|rgb\(200,\s*100,\s*70\)/
+    );
+    expect(link!.style.borderBottomWidth || link!.style.borderBottom).toContain('1px');
+    expect(link!.style.borderBottomStyle || link!.style.borderBottom).toContain('solid');
+
+    const quote = previewStage.querySelector<HTMLElement>('blockquote.morph-quote');
+    expect(quote).not.toBeNull();
+    expect(quote!.style.fontStyle).toBe('normal');
+    expect(quote!.style.fontFamily).toContain('Newsreader');
+    expect(quote!.style.fontFamily).toContain('Noto Serif SC');
+    expect((quote!.style.borderLeft || quote!.style.borderLeftColor).toLowerCase()).toMatch(
+      /#c86446|rgb\(200,\s*100,\s*70\)/
+    );
+    expect(quote!.style.borderLeftWidth || quote!.style.borderLeft).toContain('2px');
+    expect(quote!.style.color.toLowerCase()).toMatch(/#3d3c3a|rgb\(61,\s*60,\s*58\)/);
+    expect(quote!.style.marginLeft).toBe('0px');
+    expect(quote!.style.marginRight).toBe('0px');
+
+    // 3. Inline code, Code block, and Callout
+    const inlineCode = previewStage.querySelector<HTMLElement>(':not(pre) > code');
+    const codeBlock = previewStage.querySelector<HTMLElement>('pre.morph-code');
+    expect(inlineCode).not.toBeNull();
+    expect(codeBlock).not.toBeNull();
+    expect(inlineCode!.style.fontFamily).toContain('JetBrains Mono');
+    expect(inlineCode!.style.fontFamily.replace(/^["']|["']$/g, '')).toMatch(/^JetBrains Mono\b/);
+    expect(inlineCode!.style.backgroundColor.toLowerCase()).toMatch(
+      /#eae6df|rgb\(234,\s*230,\s*223\)/
+    );
+    expect(inlineCode!.style.whiteSpace).toBe('nowrap');
+
+    expect(codeBlock!.style.fontFamily).toContain('JetBrains Mono');
+    expect(codeBlock!.style.fontFamily.replace(/^["']|["']$/g, '')).toMatch(/^JetBrains Mono\b/);
+    expect(codeBlock!.style.backgroundColor.toLowerCase()).toMatch(
+      /#f2efe9|rgb\(242,\s*239,\s*233\)/
+    );
+
+    const callout = previewStage.querySelector<HTMLElement>('.morph-callout');
+    expect(callout).not.toBeNull();
+    expect(callout!.style.backgroundColor.toLowerCase()).toMatch(
+      /#f2efe9|rgb\(242,\s*239,\s*233\)/
+    );
+    const calloutBody = callout!.querySelector<HTMLElement>('.morph-callout-body');
+    expect(calloutBody).not.toBeNull();
+    const calloutPara = calloutBody!.querySelector<HTMLElement>('p');
+    expect(calloutPara).not.toBeNull();
+    expect(calloutPara!.style.marginBottom).toBe('0px');
+    for (const child of Array.from(calloutBody!.childNodes)) {
+      if (child.nodeType === window.Node.TEXT_NODE) {
+        expect((child.textContent || '').trim().length).toBeGreaterThan(0);
+      }
+    }
+
+    const table = previewStage.querySelector<HTMLElement>('table.morph-table');
+    expect(table).not.toBeNull();
+    const th = table!.querySelector<HTMLElement>('th');
+    const td = table!.querySelector<HTMLElement>('td');
+    expect(th).not.toBeNull();
+    expect(td).not.toBeNull();
+    expect((th!.style.borderBottom || th!.style.borderBottomColor).toLowerCase()).toMatch(
+      /#141413|rgb\(20,\s*20,\s*19\)/
+    );
+    expect(th!.style.borderBottomWidth || th!.style.borderBottom).toContain('2px');
+    expect((td!.style.borderBottom || td!.style.borderBottomColor).toLowerCase()).toMatch(
+      /#e2dfd7|rgb\(226,\s*223,\s*215\)/
+    );
+    expect(td!.style.borderBottomWidth || td!.style.borderBottom).toContain('1px');
+
+    for (const cell of [th!, td!]) {
+      const topSpec = cell.style.borderTop || cell.style.borderTopStyle || cell.style.borderTopWidth;
+      const leftSpec = cell.style.borderLeft || cell.style.borderLeftStyle || cell.style.borderLeftWidth;
+      const rightSpec = cell.style.borderRight || cell.style.borderRightStyle || cell.style.borderRightWidth;
+      expect(topSpec).toMatch(/none|0px|^0$/i);
+      expect(leftSpec).toMatch(/none|0px|^0$/i);
+      expect(rightSpec).toMatch(/none|0px|^0$/i);
+    }
+
+    const img = previewStage.querySelector<HTMLElement>('img.morph-img');
+    expect(img).not.toBeNull();
+    expect(img!.style.borderRadius).toBe('6px');
   });
 
-  it('test_switching_style_drawer_tabs_exclusively_displays_active_panel_and_applies_extended_settings', async () => {
+  it('test_clicking_single_preset_drills_down_to_css_editor_and_creating_new_custom_css_preset_updates_preview', async () => {
     const isPanelVisible = (root: HTMLElement, testId: string): boolean => {
       const panel = root.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
       if (!panel) return false;
@@ -616,88 +746,40 @@ describe('TestStyleDrawerCustomization', () => {
 
     const { container } = await mountWorkbench({
       initialMarkdown:
-        '# 样式抽屉三栏面板验证\n\n## 二级标题装饰测试\n\n> 引用块容器测试\n\n正文段落包含 **高亮重点** 文本内容。',
+        '# 样式抽屉单面板验证\n\n## 二级标题装饰测试\n\n> 引用块容器测试\n\n正文段落包含 **高亮重点** 文本内容。',
     });
 
     const previewStage = getByTestId(container, 'preview-stage');
-
-    // 1. Theme tab is active initially; typography and css panels are hidden/unmounted
-    expect(isPanelVisible(container, 'style-panel-theme')).toBe(true);
-    expect(isPanelVisible(container, 'style-panel-typography')).toBe(false);
-    expect(isPanelVisible(container, 'style-panel-css')).toBe(false);
-
-    // Apply sepia paper preset in theme panel
-    await clickTestId(container, 'paper-preset-sepia');
-    const afterSepiaHtml = previewStage.innerHTML.toLowerCase();
-    expect(
-      afterSepiaHtml.includes('#f6f1e7') || afterSepiaHtml.includes('rgb(246, 241, 231)')
-    ).toBe(true);
-
-    // Switch to cards view and verify card-header-input updates rendered card header
-    await clickTestId(container, 'target-tab-cards');
-    await setControlValue(container, 'card-header-input', 'MorphMD 专栏卡片');
-    expect(previewStage.querySelector('.morph-card-header')?.textContent).toContain(
-      'MorphMD 专栏卡片'
-    );
-    await clickTestId(container, 'target-tab-wechat');
-
-    // 2. Switch to Typography tab: only style-panel-typography is visible
-    await clickTestId(container, 'style-tab-typography');
-    expect(isPanelVisible(container, 'style-panel-theme')).toBe(false);
-    expect(isPanelVisible(container, 'style-panel-typography')).toBe(true);
-    expect(isPanelVisible(container, 'style-panel-css')).toBe(false);
-
-    await clickTestId(container, 'paragraph-indent-toggle');
-    await setControlValue(container, 'letter-spacing-input', '0.05em');
-    const afterTypoHtml = previewStage.innerHTML.toLowerCase();
-    expect(afterTypoHtml).toContain('text-indent');
-    expect(afterTypoHtml).toContain('0.05em');
-
-    // 3. Switch to Custom CSS tab: only style-panel-css is visible, starting in list mode
-    await clickTestId(container, 'style-tab-css');
-    expect(isPanelVisible(container, 'style-panel-theme')).toBe(false);
-    expect(isPanelVisible(container, 'style-panel-typography')).toBe(false);
-    expect(isPanelVisible(container, 'style-panel-css')).toBe(true);
-
     const cssPanel = getByTestId(container, 'style-panel-css');
+    expect(isPanelVisible(container, 'style-panel-css')).toBe(true);
     expect(cssPanel.getAttribute('data-view-mode')).toBe('list');
     expect(getByTestId(cssPanel, 'css-list-view')).toBeTruthy();
     expect(getByTestId(cssPanel, 'css-preset-list')).toBeTruthy();
     expect(getByTestId(cssPanel, 'css-preset-item-default')).toBeTruthy();
-    expect(getByTestId(cssPanel, 'css-preset-item-reading')).toBeTruthy();
+    expect(getByTestId(cssPanel, 'css-preset-item-yoryon')).toBeTruthy();
+    expect(cssPanel.querySelectorAll('[data-testid^="css-preset-item-"]')).toHaveLength(2);
 
-    // Top 3 tabs remain fixed and mounted
-    expect(getByTestId(container, 'style-tab-theme')).toBeTruthy();
-    expect(getByTestId(container, 'style-tab-typography')).toBeTruthy();
-    expect(getByTestId(container, 'style-tab-css')).toBeTruthy();
-
-    // Click preset item -> in-place right-to-left slide into editor drilldown view
-    const beforeReadingHtml = previewStage.innerHTML;
-    await clickTestId(container, 'css-preset-item-reading');
+    // Click default preset item -> slide into editor drilldown view
+    await clickTestId(container, 'css-preset-item-default');
     expect(cssPanel.getAttribute('data-view-mode')).toBe('editor');
     expect(getByTestId(cssPanel, 'css-drilldown-view')).toBeTruthy();
-    expect(cssPanel.querySelector('[data-testid="css-quick-insert-bar"]')).toBeNull();
     expect(getByTestId(cssPanel, 'toggle-css-guide-btn')).toBeTruthy();
-    expect(cssPanel.querySelector('[data-testid="delete-css-preset-btn"]')).toBeTruthy();
+
+    const presetNameInput = getByTestId<HTMLInputElement>(cssPanel, 'css-preset-name-input');
+    const customCssInput = getByTestId<HTMLTextAreaElement>(cssPanel, 'custom-css-input');
+    expect(presetNameInput.value.trim().length).toBeGreaterThan(0);
+    expect(customCssInput.value).toContain('Newsreader');
 
     await clickTestId(container, 'toggle-css-guide-btn');
     const guideModal = getByTestId(container, 'css-guide-modal');
     expect(guideModal.textContent).toContain('.morph-h2');
     expect(guideModal.textContent).toContain('.morph-quote');
-    expect(guideModal.textContent).toContain('var(--morph-accent)');
     await clickTestId(container, 'close-css-guide-modal-btn');
     expect(isPanelVisible(container, 'css-guide-modal')).toBe(false);
 
-    const presetNameInput = getByTestId<HTMLInputElement>(cssPanel, 'css-preset-name-input');
-    const customCssInput = getByTestId<HTMLTextAreaElement>(cssPanel, 'custom-css-input');
-    expect(presetNameInput.value.trim().length).toBeGreaterThan(0);
-    expect(customCssInput.value.trim().length).toBeGreaterThan(0);
-    expect(previewStage.innerHTML).not.toBe(beforeReadingHtml);
-
-    // Click back button -> slide back to list view while top 3 tabs remain fixed
+    // Click back button -> slide back to list view
     await clickTestId(container, 'back-to-css-list-btn');
     expect(cssPanel.getAttribute('data-view-mode')).toBe('list');
-    expect(getByTestId(container, 'style-tab-theme')).toBeTruthy();
 
     // Click "+ 新建样式" -> slide into editor view with empty code and visible grey tutorial overlay
     await clickTestId(container, 'new-css-preset-btn');
@@ -719,8 +801,121 @@ describe('TestStyleDrawerCustomization', () => {
     await setControlValue(container, 'css-preset-name-input', '自定义强调样式');
     await clickTestId(container, 'save-css-preset-btn');
     expect(cssPanel.getAttribute('data-view-mode')).toBe('list');
+    expect(cssPanel.querySelectorAll('[data-testid^="css-preset-item-"]')).toHaveLength(3);
     expect(getByTestId(cssPanel, 'css-preset-list').textContent).toContain('自定义强调样式');
     expect(previewStage.innerHTML.toLowerCase()).toMatch(/#faebdd|rgb\(250,\s*235,\s*221\)/);
+  });
+
+  it('test_selecting_yoryon_editorial_preset_applies_book_serif_body_centered_h1_slate_blue_accent_and_wysiwyg_table', async () => {
+    const copiedPayloads: ClipboardPayload[] = [];
+    const { container } = await mountWorkbench({
+      onCopyPayload: (payload) => copiedPayloads.push(payload),
+    });
+
+    await clickTestId(container, 'css-preset-item-yoryon');
+    await clickTestId(container, 'primary-delivery-btn');
+
+    expect(copiedPayloads.length).toBeGreaterThanOrEqual(1);
+    const copiedDoc = documentOf(copiedPayloads[0].html);
+    const previewStage = getByTestId(container, 'preview-stage');
+
+    for (const root of [previewStage, copiedDoc.body]) {
+      // a) .morph-doc book-serif body typography & color
+      const docEl = root.querySelector<HTMLElement>('.morph-doc');
+      expect(docEl).not.toBeNull();
+      expect(docEl!.style.fontFamily).toMatch(/Iowan Old Style|Palatino|Songti SC/i);
+      expect(docEl!.style.fontSize).toBe('17px');
+      expect(docEl!.style.lineHeight).toBe('1.85');
+      expect(docEl!.style.color.toLowerCase()).toMatch(/#282828|rgb\(40,\s*40,\s*40\)/);
+
+      // b) h1.morph-h1 centered 31px title
+      const h1 = root.querySelector<HTMLElement>('h1.morph-h1');
+      expect(h1).not.toBeNull();
+      expect(h1!.style.fontSize).toBe('31px');
+      expect(h1!.style.lineHeight).toBe('1.38');
+      expect(h1!.style.fontWeight).toBe('600');
+      expect(h1!.style.textAlign).toBe('center');
+
+      // c) h2.morph-h2 and h3.morph-h3 hierarchy
+      const h2 = root.querySelector<HTMLElement>('h2.morph-h2');
+      const h3 = root.querySelector<HTMLElement>('h3.morph-h3');
+      expect(h2).not.toBeNull();
+      expect(h3).not.toBeNull();
+      expect(h2!.style.fontSize).toBe('23px');
+      expect(h2!.style.lineHeight).toBe('1.4');
+      expect(h2!.style.fontWeight).toBe('600');
+      expect(h3!.style.fontSize).toBe('19px');
+      expect(h3!.style.lineHeight).toBe('1.4');
+      expect(h3!.style.fontWeight).toBe('600');
+
+      // d) blockquote.morph-quote slate-blue left border & ink
+      const quote = root.querySelector<HTMLElement>('blockquote.morph-quote');
+      expect(quote).not.toBeNull();
+      expect(quote!.style.borderLeftWidth || quote!.style.borderLeft).toContain('2px');
+      expect((quote!.style.borderLeft || quote!.style.borderLeftColor).toLowerCase()).toMatch(
+        /#47758f|rgb\(71,\s*117,\s*143\)/
+      );
+      expect(quote!.style.fontStyle).toBe('normal');
+      expect(quote!.style.color.toLowerCase()).toMatch(/#253947|rgb\(37,\s*57,\s*71\)/);
+
+      // e) link color #47758f
+      const link = root.querySelector<HTMLElement>('p a, a');
+      expect(link).not.toBeNull();
+      expect(link!.style.color.toLowerCase()).toMatch(/#47758f|rgb\(71,\s*117,\s*143\)/);
+
+      // f) inline code and pre.morph-code
+      const inlineCode = root.querySelector<HTMLElement>(':not(pre) > code');
+      const codeBlock = root.querySelector<HTMLElement>('pre.morph-code');
+      expect(inlineCode).not.toBeNull();
+      expect(codeBlock).not.toBeNull();
+      for (const codeEl of [inlineCode!, codeBlock!]) {
+        expect(codeEl.style.fontFamily).toMatch(/SF Mono|SFMono-Regular|Menlo/i);
+        expect(codeEl.style.backgroundColor.toLowerCase()).toMatch(
+          /#f3f3f2|rgb\(243,\s*243,\s*242\)/
+        );
+        expect(codeEl.style.color.toLowerCase()).toMatch(/#3d3936|rgb\(61,\s*57,\s*54\)/);
+      }
+
+      // g) table.morph-table fixed layout and slate-tinted academic borders
+      const table = root.querySelector<HTMLElement>('table.morph-table');
+      expect(table).not.toBeNull();
+      expect(table!.style.tableLayout).toBe('fixed');
+      expect(table!.style.marginTop).toBe('0px');
+
+      const ths = Array.from(table!.querySelectorAll<HTMLElement>('th'));
+      const tds = Array.from(table!.querySelectorAll<HTMLElement>('td'));
+      expect(ths.length).toBeGreaterThan(0);
+      expect(tds.length).toBeGreaterThan(0);
+      for (const th of ths) {
+        expect(th.style.borderTopWidth || th.style.borderTop).toContain('0px');
+        expect(th.style.borderLeftWidth || th.style.borderLeft).toContain('0px');
+        expect(th.style.borderRightWidth || th.style.borderRight).toContain('0px');
+        expect(th.style.borderBottomWidth || th.style.borderBottom).toContain('2px');
+        expect((th.style.borderBottom || th.style.borderBottomColor).toLowerCase()).toMatch(
+          /#dfeaf0|rgb\(223,\s*234,\s*240\)/
+        );
+      }
+      for (const td of tds) {
+        expect(td.style.borderTopWidth || td.style.borderTop).toContain('0px');
+        expect(td.style.borderLeftWidth || td.style.borderLeft).toContain('0px');
+        expect(td.style.borderRightWidth || td.style.borderRight).toContain('0px');
+        expect(td.style.borderBottomWidth || td.style.borderBottom).toContain('1px');
+        expect((td.style.borderBottom || td.style.borderBottomColor).toLowerCase()).toMatch(
+          /#dfeaf0|rgb\(223,\s*234,\s*240\)/
+        );
+      }
+
+      // h) Flow blocks have single-direction vertical margin (marginTop === '0px')
+      const flowBlocks = Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'p.morph-p, blockquote.morph-quote, pre.morph-code, .morph-callout, .morph-math-display, ul.morph-list, ol.morph-list'
+        )
+      );
+      expect(flowBlocks.length).toBeGreaterThan(0);
+      for (const block of flowBlocks) {
+        expect(block.style.marginTop).toBe('0px');
+      }
+    }
   });
 });
 
@@ -1122,5 +1317,290 @@ describe('TestDeliveryCopyAndExport', () => {
     const secondCopy = fallbackCopyEvents[1];
     expect(secondCopy.get('text/html')).toContain('<strong');
     expect(secondCopy.get('text/plain')).not.toMatch(/\n{3,}/);
+  });
+});
+
+describe('class TestWorkbenchUi', () => {
+  it('test_wechat_default_preview_and_copy_payload_inline_heading_hierarchy_quote_margins_and_image_radius', async () => {
+    const cssText = readFileSync(resolve(__dirname, '../src/styles/workbench.css'), 'utf-8');
+    const styleEl = document.createElement('style');
+    styleEl.textContent = cssText;
+    document.head.appendChild(styleEl);
+
+    const copiedPayloads: ClipboardPayload[] = [];
+    const { container } = await mountWorkbench({
+      onCopyPayload: (payload) => copiedPayloads.push(payload),
+    });
+
+    const copyBtn = container.querySelector<HTMLElement>(
+      '[data-testid="copy-full-btn"], [data-testid="primary-delivery-btn"]'
+    );
+    expect(copyBtn).not.toBeNull();
+    await act(async () => {
+      copyBtn!.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await flushWorkbench();
+
+    expect(copiedPayloads.length).toBeGreaterThanOrEqual(1);
+    const copiedHtml = copiedPayloads[0].html;
+    const copiedDoc = documentOf(copiedHtml);
+
+    const previewContainer = container.querySelector<HTMLElement>(
+      '[data-testid="preview-scroll-container"], [data-testid="preview-stage"]'
+    );
+    expect(previewContainer).not.toBeNull();
+
+    for (const root of [previewContainer!, copiedDoc.body]) {
+      const h1 = root.querySelector<HTMLElement>('h1.morph-h1');
+      const h2 = root.querySelector<HTMLElement>('h2.morph-h2');
+      const h3 = root.querySelector<HTMLElement>('h3.morph-h3');
+      const p = root.querySelector<HTMLElement>('p.morph-p, p');
+
+      expect(h1).not.toBeNull();
+      expect(h2).not.toBeNull();
+      expect(h3).not.toBeNull();
+      expect(p).not.toBeNull();
+
+      expect(h1!.style.fontSize).toMatch(/px$/i);
+      expect(h2!.style.fontSize).toMatch(/px$/i);
+      expect(h3!.style.fontSize).toMatch(/px$/i);
+      expect(h1!.style.lineHeight).toBeTruthy();
+      expect(h2!.style.lineHeight).toBeTruthy();
+      expect(h3!.style.lineHeight).toBeTruthy();
+
+      const h1Size = parseFloat(h1!.style.fontSize);
+      const h2Size = parseFloat(h2!.style.fontSize);
+      const h3Size = parseFloat(h3!.style.fontSize);
+      const pSize = parseFloat(p!.style.fontSize || '16');
+
+      expect(h1Size).toBeGreaterThanOrEqual(24);
+      expect(h2Size).toBeGreaterThanOrEqual(20);
+      expect(h3Size).toBeGreaterThanOrEqual(17);
+      expect(h1Size).toBeGreaterThan(h2Size);
+      expect(h2Size).toBeGreaterThan(h3Size);
+      expect(h3Size).toBeGreaterThan(pSize);
+    }
+
+    const previewQuote = previewContainer!.querySelector<HTMLElement>('blockquote.morph-quote');
+    expect(previewQuote).not.toBeNull();
+    expect(previewQuote!.style.marginLeft).toBe('0px');
+    expect(previewQuote!.style.marginRight).toBe('0px');
+
+    const computedQuote = window.getComputedStyle(previewQuote!);
+    expect(computedQuote.marginLeft).toBe('0px');
+    expect(computedQuote.marginRight).toBe('0px');
+
+    const quoteParagraphs = previewQuote!.querySelectorAll<HTMLElement>('p');
+    expect(quoteParagraphs.length).toBeGreaterThanOrEqual(1);
+    const lastQuoteParagraph = quoteParagraphs[quoteParagraphs.length - 1];
+    expect(lastQuoteParagraph.style.marginBottom).toBe('0px');
+
+    const copiedImg = copiedDoc.querySelector<HTMLElement>('img.morph-img');
+    expect(copiedImg).not.toBeNull();
+    expect(parseFloat(copiedImg!.style.borderRadius)).toBeGreaterThanOrEqual(6);
+  });
+
+  it('test_default_showcase_markdown_renders_all_core_editorial_elements', async () => {
+    const { container } = await mountWorkbench();
+
+    const previewContainer = container.querySelector<HTMLElement>(
+      '[data-testid="preview-scroll-container"], [data-testid="preview-stage"]'
+    );
+    expect(previewContainer).not.toBeNull();
+
+    // Headings
+    expect(previewContainer!.querySelector('h1.morph-h1')).not.toBeNull();
+    expect(previewContainer!.querySelector('h2.morph-h2')).not.toBeNull();
+    expect(previewContainer!.querySelector('h3.morph-h3')).not.toBeNull();
+
+    // Inline formatting inside paragraphs: strong, em, inline code, link
+    expect(previewContainer!.querySelector('p strong')).not.toBeNull();
+    expect(previewContainer!.querySelector('p em')).not.toBeNull();
+    const inlineCode = previewContainer!.querySelector<HTMLElement>(':not(pre) > code');
+    expect(inlineCode).not.toBeNull();
+    expect(inlineCode!.style.backgroundColor).toBeTruthy();
+    expect(inlineCode!.style.borderRadius).toBeTruthy();
+    expect(previewContainer!.querySelector('p a, a')).not.toBeNull();
+
+    // Blockquote
+    expect(previewContainer!.querySelector('blockquote.morph-quote')).not.toBeNull();
+
+    // Callout block
+    const callout = previewContainer!.querySelector<HTMLElement>('.morph-callout');
+    expect(callout).not.toBeNull();
+    expect(callout!.querySelector('.morph-callout-title')).not.toBeNull();
+    expect(callout!.querySelector('.morph-callout-body')).not.toBeNull();
+
+    // Both unordered list and ordered list
+    expect(previewContainer!.querySelector('ul.morph-list')).not.toBeNull();
+    expect(previewContainer!.querySelector('ol.morph-list')).not.toBeNull();
+
+    // Code block
+    expect(previewContainer!.querySelector('pre.morph-code')).not.toBeNull();
+
+    // Table with inline border and padding on th and td
+    const table = previewContainer!.querySelector<HTMLElement>('table.morph-table');
+    expect(table).not.toBeNull();
+    const th = table!.querySelector<HTMLElement>('th');
+    const td = table!.querySelector<HTMLElement>('td');
+    expect(th).not.toBeNull();
+    expect(td).not.toBeNull();
+    expect(th!.style.border || th!.style.borderTop || th!.style.borderBottom).toBeTruthy();
+    expect(th!.style.padding || th!.style.paddingTop).toBeTruthy();
+    expect(td!.style.border || td!.style.borderTop || td!.style.borderBottom).toBeTruthy();
+    expect(td!.style.padding || td!.style.paddingTop).toBeTruthy();
+
+    // Image
+    expect(previewContainer!.querySelector('img.morph-img')).not.toBeNull();
+
+    // Math formula
+    expect(previewContainer!.querySelector('[data-math-tex]')).not.toBeNull();
+
+    // Horizontal rule
+    expect(previewContainer!.querySelector('hr')).not.toBeNull();
+  });
+
+  it('test_wechat_list_items_wrap_inline_content_in_section_and_math_formulas_render_as_vector_svg_without_annotation_leakage', async () => {
+    const copiedPayloads: ClipboardPayload[] = [];
+    const { container } = await mountWorkbench({
+      onCopyPayload: (payload) => copiedPayloads.push(payload),
+    });
+
+    const copyBtn = container.querySelector<HTMLElement>(
+      '[data-testid="copy-full-btn"], [data-testid="primary-delivery-btn"]'
+    );
+    expect(copyBtn).not.toBeNull();
+    await act(async () => {
+      copyBtn!.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await flushWorkbench();
+
+    expect(copiedPayloads.length).toBeGreaterThanOrEqual(1);
+    const copiedDoc = documentOf(copiedPayloads[0].html);
+
+    const previewContainer = container.querySelector<HTMLElement>(
+      '[data-testid="preview-scroll-container"], [data-testid="preview-stage"]'
+    );
+    expect(previewContainer).not.toBeNull();
+
+    for (const root of [previewContainer!, copiedDoc.body]) {
+      // 1. List item <section> wrapping
+      const orderedItems = Array.from(root.querySelectorAll<HTMLElement>('ol.morph-list > li'));
+      expect(orderedItems.length).toBeGreaterThanOrEqual(3);
+
+      for (const li of orderedItems) {
+        const section = li.querySelector<HTMLElement>(':scope > section');
+        expect(section).not.toBeNull();
+        const strong = section!.querySelector<HTMLElement>('strong');
+        expect(strong).not.toBeNull();
+        const fullText = (section!.textContent || '').trim();
+        const strongText = (strong!.textContent || '').trim();
+        expect(fullText.startsWith(strongText)).toBe(true);
+        const remainder = fullText.slice(strongText.length);
+        expect(remainder.startsWith('：')).toBe(true);
+      }
+
+      // 2. Math formulas rendered as vector <svg> without <math> or <annotation> leakage
+      const inlineMath = root.querySelector<HTMLElement>('.morph-math-inline[data-math-tex]');
+      const displayMath = root.querySelector<HTMLElement>('.morph-math-display[data-math-tex]');
+      expect(inlineMath).not.toBeNull();
+      expect(displayMath).not.toBeNull();
+
+      for (const mathEl of [inlineMath!, displayMath!]) {
+        expect(mathEl.querySelector('svg')).not.toBeNull();
+        expect(mathEl.querySelector('svg path')).not.toBeNull();
+        expect(mathEl.querySelector('svg g[fill="currentColor"]')).not.toBeNull();
+        const leakedText = mathEl.textContent || '';
+        expect(leakedText).not.toContain('\\mathcal');
+        expect(leakedText).not.toContain('\\frac');
+        expect(leakedText).not.toContain('\\sum');
+      }
+
+      expect(root.querySelectorAll('math, annotation')).toHaveLength(0);
+      expect(displayMath!.style.textAlign).toBe('center');
+
+      const displaySvg = displayMath!.querySelector<SVGSVGElement>('svg');
+      expect(displaySvg).not.toBeNull();
+      expect(displaySvg!.style.display).toBe('block');
+      expect(displaySvg!.style.marginLeft).toBe('auto');
+      expect(displaySvg!.style.marginRight).toBe('auto');
+
+      const inlineSvg = inlineMath!.querySelector<SVGSVGElement>('svg');
+      expect(inlineSvg).not.toBeNull();
+      expect(inlineSvg!.style.display).not.toBe('block');
+    }
+  });
+
+  it('test_wechat_copy_payload_and_preview_preserve_wysiwyg_table_borders_fixed_layout_and_single_direction_block_spacing', async () => {
+    const copiedPayloads: ClipboardPayload[] = [];
+    const { container } = await mountWorkbench({
+      onCopyPayload: (payload) => copiedPayloads.push(payload),
+    });
+
+    const copyBtn = container.querySelector<HTMLElement>(
+      '[data-testid="copy-full-btn"], [data-testid="primary-delivery-btn"]'
+    );
+    expect(copyBtn).not.toBeNull();
+    await act(async () => {
+      copyBtn!.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await flushWorkbench();
+
+    expect(copiedPayloads.length).toBeGreaterThanOrEqual(1);
+    const copiedDoc = documentOf(copiedPayloads[0].html);
+    const previewStage = getByTestId(container, 'preview-stage');
+
+    for (const root of [previewStage, copiedDoc.body]) {
+      const table = root.querySelector<HTMLElement>('table.morph-table');
+      expect(table).not.toBeNull();
+
+      // a) No foster-parented multi-newline text node immediately preceding <table class="morph-table">
+      const prevNode = table!.previousSibling;
+      if (prevNode && prevNode.nodeType === window.Node.TEXT_NODE) {
+        expect(/\n\s*\n/.test(prevNode.textContent || '')).toBe(false);
+      }
+
+      // b) Table uses fixed layout and single-direction vertical margin
+      expect(table!.style.tableLayout).toBe('fixed');
+      expect(table!.style.marginTop).toBe('0px');
+      expect(parseFloat(table!.style.marginBottom)).toBeLessThanOrEqual(24);
+
+      // c) Every th and td has explicit 0px top/left/right border width and expected bottom border
+      const ths = Array.from(table!.querySelectorAll<HTMLElement>('th'));
+      const tds = Array.from(table!.querySelectorAll<HTMLElement>('td'));
+      expect(ths.length).toBeGreaterThan(0);
+      expect(tds.length).toBeGreaterThan(0);
+
+      for (const th of ths) {
+        expect(th.style.borderTopWidth || th.style.borderTop).toContain('0px');
+        expect(th.style.borderLeftWidth || th.style.borderLeft).toContain('0px');
+        expect(th.style.borderRightWidth || th.style.borderRight).toContain('0px');
+        expect(th.style.borderBottomWidth || th.style.borderBottom).toContain('2px');
+        expect((th.style.borderBottom || th.style.borderBottomColor).toLowerCase()).toMatch(
+          /#141413|rgb\(20,\s*20,\s*19\)/
+        );
+      }
+
+      for (const td of tds) {
+        expect(td.style.borderTopWidth || td.style.borderTop).toContain('0px');
+        expect(td.style.borderLeftWidth || td.style.borderLeft).toContain('0px');
+        expect(td.style.borderRightWidth || td.style.borderRight).toContain('0px');
+        expect(td.style.borderBottomWidth || td.style.borderBottom).toContain('1px');
+        expect((td.style.borderBottom || td.style.borderBottomColor).toLowerCase()).toMatch(
+          /#e2dfd7|rgb\(226,\s*223,\s*215\)/
+        );
+      }
+
+      // d) Flow blocks all have single-direction vertical margin (marginTop === '0px')
+      const flowBlocks = Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'p.morph-p, blockquote.morph-quote, pre.morph-code, .morph-callout, .morph-math-display, ul.morph-list, ol.morph-list'
+        )
+      );
+      expect(flowBlocks.length).toBeGreaterThan(0);
+      for (const block of flowBlocks) {
+        expect(block.style.marginTop).toBe('0px');
+      }
+    }
   });
 });

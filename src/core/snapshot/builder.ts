@@ -91,7 +91,11 @@ export function createDeliverySnapshotSync(
     assets: options.version?.assets ?? 1,
   };
   const capabilities = options.capabilities || getDefaultCapabilities(targetId);
-  const astResult = compileMarkdownSync(markdown, options.compileOptions);
+  const compileOpts: CompileOptions = {
+    themeKey: 'vitesse-light',
+    ...options.compileOptions,
+  };
+  const astResult = compileMarkdownSync(markdown, compileOpts);
   return finalizeSnapshot(astResult, targetId, capabilities, assetStore, version, options);
 }
 
@@ -107,7 +111,11 @@ export async function buildDeliverySnapshot(
     assets: options.version?.assets ?? 1,
   };
   const capabilities = options.capabilities || getDefaultCapabilities(targetId);
-  const astResult = await compileMarkdown(markdown, options.compileOptions);
+  const compileOpts: CompileOptions = {
+    themeKey: 'vitesse-light',
+    ...options.compileOptions,
+  };
+  const astResult = await compileMarkdown(markdown, compileOpts);
   return finalizeSnapshot(astResult, targetId, capabilities, assetStore, version, options);
 }
 

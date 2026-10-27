@@ -110,12 +110,29 @@ function normalizeOrphanTableHtml() {
   };
 }
 
+function stripTableInternalWhitespace() {
+  return (tree: any) => {
+    visit(tree, 'element', (node: any) => {
+      if (
+        ['table', 'thead', 'tbody', 'tfoot', 'tr', 'colgroup'].includes(node.tagName) &&
+        Array.isArray(node.children)
+      ) {
+        node.children = node.children.filter(
+          (child: any) =>
+            !(child.type === 'text' && typeof child.value === 'string' && child.value.trim() === '')
+        );
+      }
+    });
+  };
+}
+
 const BASE_PROCESSOR = unified()
   .use(remarkParse)
   .use(remarkGfm)
   .use(remarkMath)
   .use(normalizeOrphanTableHtml)
   .use(remarkRehype, { allowDangerousHtml: true })
+  .use(stripTableInternalWhitespace)
   .use(rehypeRaw)
   .freeze();
 

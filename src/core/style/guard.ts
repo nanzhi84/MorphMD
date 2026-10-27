@@ -19,6 +19,7 @@ export const DEFAULT_ALLOWED_STYLE_PROPS = new Set([
   'margin', 'margin-top', 'margin-bottom', 'margin-left', 'margin-right',
   'border', 'border-top', 'border-bottom', 'border-left', 'border-right',
   'border-color', 'border-width', 'border-style', 'border-radius', 'border-collapse',
+  'table-layout',
   'box-sizing',
   'display',
   'width',

@@ -15,7 +15,13 @@ const SUPPORTED_LANGS: BundledLanguage[] = [
   'markdown', 'bash', 'sh', 'yaml', 'sql', 'go', 'rust', 'diff',
 ];
 
-const SUPPORTED_THEMES: BundledTheme[] = ['github-light', 'github-dark'];
+const SUPPORTED_THEMES: BundledTheme[] = [
+  'github-light',
+  'github-dark',
+  'vitesse-light',
+  'rose-pine-dawn',
+  'gruvbox-light-soft',
+];
 
 export async function initHighlighter(): Promise<HighlighterGeneric<BundledLanguage, BundledTheme>> {
   if (cachedHighlighter) return cachedHighlighter;
@@ -51,6 +57,12 @@ function stripDescendantPositions(el: Element): void {
       if (child.properties) {
         delete child.properties.dataNodeId;
         delete child.properties.dataSourceRange;
+        if (typeof child.properties.style === 'string') {
+          child.properties.style = child.properties.style.replace(
+            /#([0-9a-fA-F]{6})[0-9a-fA-F]{2}\b/g,
+            '#$1'
+          );
+        }
       }
       stripDescendantPositions(child);
     }

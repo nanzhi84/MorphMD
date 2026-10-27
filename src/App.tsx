@@ -15,14 +15,10 @@ import {
   CSS_SELECTOR_REFERENCE,
   CSS_TUTORIAL_GUIDE_LINES,
   DEFAULT_SAVED_CSS_PRESETS,
-  FONT_MONO_OPTIONS,
-  FONT_SANS_OPTIONS,
-  FONT_SERIF_OPTIONS,
   HEADING_SCALE_OPTIONS,
   HEADING_STYLE_OPTIONS,
   IMAGE_RADIUS_OPTIONS,
   NOTION_ACCENT_SWATCHES,
-  PAPER_SURFACE_PRESETS,
   QUOTE_STYLE_OPTIONS,
   THEME_PRESETS,
   type HeadingScaleId,
@@ -47,7 +43,6 @@ export interface AppProps {
   onExportCardsZip?: (result: CardsZipExportResult) => void;
 }
 
-type StyleDrawerTab = 'theme' | 'typography' | 'css';
 type DiagnosticFilter = 'all' | 'warning' | 'error';
 
 interface StyleTuningState {
@@ -129,24 +124,6 @@ function extractReferencedAssetIds(markdown: string): string[] {
     }
   }
   return [...ids];
-}
-
-function normalizePxValue(raw: string, fallbackPx: number): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return `${fallbackPx}px`;
-  if (/^\d+(\.\d+)?px$/i.test(trimmed)) return trimmed.toLowerCase();
-  if (/^\d+(\.\d+)?(rem|em|%)$/i.test(trimmed)) return trimmed.toLowerCase();
-  const numeric = parseFloat(trimmed);
-  if (!Number.isNaN(numeric) && numeric > 0) {
-    return `${numeric}px`;
-  }
-  return `${fallbackPx}px`;
-}
-
-function parseNumericPx(raw: string | undefined, fallback: number): number {
-  if (!raw) return fallback;
-  const num = parseFloat(raw);
-  return Number.isNaN(num) ? fallback : num;
 }
 
 async function readFileAsUint8Array(file: File): Promise<Uint8Array> {
@@ -270,12 +247,11 @@ export const App: React.FC<AppProps> = ({
   const [targetId, setTargetId] = useState<TargetId>(initialTargetId);
   const [snapshot, setSnapshot] = useState<DeliverySnapshot>(initBundle.initialSnap);
   const [drawerOpen, setDrawerOpen] = useState<boolean>(initialDrawerOpen);
-  const [activeStyleTab, setActiveStyleTab] = useState<StyleDrawerTab>('theme');
-  const [activePresetId, setActivePresetId] = useState<ThemePresetId>('default');
-  const [tokens, setTokens] = useState<DesignTokens>(() => ({
+  const [activePresetId] = useState<ThemePresetId>('default');
+  const [tokens] = useState<DesignTokens>(() => ({
     ...THEME_PRESETS.default.tokens,
   }));
-  const [hasCustomizedTokens, setHasCustomizedTokens] = useState<boolean>(false);
+  const [hasCustomizedTokens] = useState<boolean>(false);
   const [customCss, setCustomCss] = useState<string>('');
   const [savedCssPresets, setSavedCssPresets] = useState<SavedCssPresetItem[]>(() => [
     ...DEFAULT_SAVED_CSS_PRESETS,
@@ -286,8 +262,8 @@ export const App: React.FC<AppProps> = ({
   const [draftCssPresetName, setDraftCssPresetName] = useState<string>(
     DEFAULT_SAVED_CSS_PRESETS[0].name
   );
-  const [tuning, setTuning] = useState<StyleTuningState>(() => ({ ...DEFAULT_STYLE_TUNING }));
-  const [hasCustomizedTuning, setHasCustomizedTuning] = useState<boolean>(false);
+  const [tuning] = useState<StyleTuningState>(() => ({ ...DEFAULT_STYLE_TUNING }));
+  const [hasCustomizedTuning] = useState<boolean>(false);
   const [cardRatio, setCardRatio] = useState<CardAspectRatio>('3:4');
   const [canvasPreset, setCanvasPreset] = useState<string>(
     initialTargetId === 'cards' ? '3:4' : initialTargetId === 'x-article' ? '680px' : '720px'
@@ -597,85 +573,6 @@ export const App: React.FC<AppProps> = ({
   }, [session]);
 
   // 5. Style Settings Drawer Handlers
-  const handleSelectPreset = useCallback(
-    async (presetId: ThemePresetId) => {
-      const preset = THEME_PRESETS[presetId];
-      const nextTokens: DesignTokens = { ...preset.tokens };
-      setActivePresetId(presetId);
-      setTokens(nextTokens);
-      setHasCustomizedTokens(true);
-
-      const effectiveCss = buildEffectiveCss(targetId, presetId, customCss, true);
-      const snap = await session.updateStyle({
-        tokens: nextTokens,
-        customCss: effectiveCss || undefined,
-      });
-      setSnapshot(snap);
-    },
-    [buildEffectiveCss, customCss, session, targetId]
-  );
-
-  const applyTokenPatch = useCallback(
-    async (patch: Partial<DesignTokens>, forceIncludePresetCss = true) => {
-      const nextTokens: DesignTokens = {
-        ...tokensRef.current,
-        ...(patch as Record<string, string>),
-      };
-      tokensRef.current = nextTokens;
-      setTokens(nextTokens);
-      setHasCustomizedTokens(true);
-
-      const effectiveCss = buildEffectiveCss(
-        targetId,
-        activePresetId,
-        customCssRef.current,
-        forceIncludePresetCss
-      );
-      const snap = await session.updateStyle({
-        tokens: nextTokens,
-        customCss: effectiveCss || undefined,
-      });
-      setSnapshot(snap);
-    },
-    [activePresetId, buildEffectiveCss, session, targetId]
-  );
-
-  const handleAccentChange = useCallback(
-    async (hexValue: string) => {
-      const cleaned = hexValue.trim();
-      if (tokensRef.current['--morph-accent'] === cleaned) return;
-      await applyTokenPatch({ '--morph-accent': cleaned }, true);
-    },
-    [applyTokenPatch]
-  );
-
-  const handleBodySizeChange = useCallback(
-    async (rawVal: string) => {
-      const formatted = normalizePxValue(rawVal, 15);
-      if (tokensRef.current['--morph-body-size'] === formatted) return;
-      await applyTokenPatch({ '--morph-body-size': formatted }, false);
-    },
-    [applyTokenPatch]
-  );
-
-  const handleLineHeightChange = useCallback(
-    async (rawVal: string) => {
-      const trimmed = rawVal.trim() || '1.8';
-      if (tokensRef.current['--morph-line-height'] === trimmed) return;
-      await applyTokenPatch({ '--morph-line-height': trimmed }, false);
-    },
-    [applyTokenPatch]
-  );
-
-  const handleBlockGapChange = useCallback(
-    async (rawVal: string) => {
-      const formatted = normalizePxValue(rawVal, 16);
-      if (tokensRef.current['--morph-block-gap'] === formatted) return;
-      await applyTokenPatch({ '--morph-block-gap': formatted }, false);
-    },
-    [applyTokenPatch]
-  );
-
   const applyCustomCssValue = useCallback(
     async (nextCss: string) => {
       if (customCssRef.current === nextCss) return;
@@ -685,11 +582,11 @@ export const App: React.FC<AppProps> = ({
         targetId,
         activePresetId,
         nextCss,
-        hasCustomizedTokens
+        targetId !== 'x-article' || hasCustomizedTokens
       );
       const snap = await session.updateStyle({
         customCss: effectiveCss,
-        tokens: hasCustomizedTokens ? tokensRef.current : undefined,
+        tokens: targetId !== 'x-article' || hasCustomizedTokens ? tokensRef.current : undefined,
       });
       setSnapshot(snap);
     },
@@ -701,80 +598,6 @@ export const App: React.FC<AppProps> = ({
       await applyCustomCssValue(e.target.value);
     },
     [applyCustomCssValue]
-  );
-
-  const applyTuningPatch = useCallback(
-    async (patch: Partial<StyleTuningState>) => {
-      const nextTuning: StyleTuningState = {
-        ...tuningRef.current,
-        ...patch,
-      };
-      tuningRef.current = nextTuning;
-      hasCustomizedTuningRef.current = true;
-      setTuning(nextTuning);
-      setHasCustomizedTuning(true);
-
-      const effectiveCss = buildEffectiveCss(
-        targetId,
-        activePresetId,
-        customCssRef.current,
-        targetId !== 'x-article' || hasCustomizedTokens,
-        nextTuning,
-        true
-      );
-      const footerFormat =
-        nextTuning.cardFooterMode === 'verbose'
-          ? (page: number, total: number) => `第 ${page} 页 · 共 ${total} 页`
-          : nextTuning.cardFooterMode === 'hidden'
-            ? () => ''
-            : ('number-slash-total' as const);
-
-      const snap = await session.updateStyle({
-        customCss: effectiveCss || undefined,
-        tokens: targetId !== 'x-article' || hasCustomizedTokens ? tokensRef.current : undefined,
-        cardsOptions: {
-          ratio: cardRatio,
-          headerText: nextTuning.cardHeaderText,
-          footerFormat,
-        },
-      });
-      setSnapshot(snap);
-    },
-    [activePresetId, buildEffectiveCss, cardRatio, hasCustomizedTokens, session, targetId]
-  );
-
-  const handleSelectPaperPreset = useCallback(
-    async (paperId: PaperPresetId) => {
-      const paper = PAPER_SURFACE_PRESETS.find((p) => p.id === paperId);
-      if (!paper) return;
-      tuningRef.current = { ...tuningRef.current, paperId };
-      setTuning((prev) => ({ ...prev, paperId }));
-      await applyTokenPatch(
-        {
-          '--morph-bg': paper.bg,
-          '--morph-ink': paper.ink,
-        },
-        true
-      );
-    },
-    [applyTokenPatch]
-  );
-
-  const handleCardHeaderChange = useCallback(
-    async (headerVal: string) => {
-      if (tuningRef.current.cardHeaderText === headerVal) return;
-      await applyTuningPatch({ cardHeaderText: headerVal });
-    },
-    [applyTuningPatch]
-  );
-
-  const handleLetterSpacingChange = useCallback(
-    async (spacingVal: string) => {
-      const cleaned = spacingVal.trim() || '0px';
-      if (tuningRef.current.letterSpacing === cleaned) return;
-      await applyTuningPatch({ letterSpacing: cleaned });
-    },
-    [applyTuningPatch]
   );
 
   const handleDraftCssPresetNameChange = useCallback((nextName: string) => {
@@ -940,24 +763,6 @@ export const App: React.FC<AppProps> = ({
         case 'markdown-input':
           applyMarkdownInput(val, target as HTMLTextAreaElement);
           break;
-        case 'accent-hex-input':
-          void handleAccentChange(val);
-          break;
-        case 'body-size-input':
-          void handleBodySizeChange(val);
-          break;
-        case 'line-height-input':
-          void handleLineHeightChange(val);
-          break;
-        case 'block-gap-input':
-          void handleBlockGapChange(val);
-          break;
-        case 'card-header-input':
-          void handleCardHeaderChange(val);
-          break;
-        case 'letter-spacing-input':
-          void handleLetterSpacingChange(val);
-          break;
         case 'css-preset-name-input':
           handleDraftCssPresetNameChange(val);
           break;
@@ -978,13 +783,7 @@ export const App: React.FC<AppProps> = ({
   }, [
     applyCustomCssValue,
     applyMarkdownInput,
-    handleAccentChange,
-    handleBlockGapChange,
-    handleBodySizeChange,
-    handleCardHeaderChange,
     handleDraftCssPresetNameChange,
-    handleLetterSpacingChange,
-    handleLineHeightChange,
   ]);
 
   const startColumnResize = useCallback((target: 'editor' | 'drawer', clientX: number) => {
@@ -1242,9 +1041,6 @@ export const App: React.FC<AppProps> = ({
     const baseZoom = Number.isNaN(num) ? 1 : num / 100;
     return targetId === 'cards' ? Number((baseZoom * 0.68).toFixed(3)) : baseZoom;
   }, [targetId, zoomPercent]);
-
-  const bodySizePx = parseNumericPx(tokens['--morph-body-size'], 15);
-  const blockGapPx = parseNumericPx(tokens['--morph-block-gap'], 16);
 
   return (
     <div ref={appRootRef} className="morph-app">
@@ -1649,616 +1445,15 @@ export const App: React.FC<AppProps> = ({
             </button>
           </div>
 
-          <div className="morph-drawer-tabs" role="tablist" aria-label="样式设置分组">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeStyleTab === 'theme'}
-              className={`morph-drawer-tab ${activeStyleTab === 'theme' ? 'is-active' : ''}`}
-              data-testid="style-tab-theme"
-              onClick={() => setActiveStyleTab('theme')}
-            >
-              主题
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeStyleTab === 'typography'}
-              className={`morph-drawer-tab ${activeStyleTab === 'typography' ? 'is-active' : ''}`}
-              data-testid="style-tab-typography"
-              onClick={() => setActiveStyleTab('typography')}
-            >
-              排版
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeStyleTab === 'css'}
-              className={`morph-drawer-tab ${activeStyleTab === 'css' ? 'is-active' : ''}`}
-              data-testid="style-tab-css"
-              onClick={() => setActiveStyleTab('css')}
-            >
-              自定义 CSS
-            </button>
-          </div>
-
           <div className="morph-drawer-content">
-            {/* TAB PANEL 1: THEME (主题预设、主题色、纸张底色、组件装饰、卡片页眉页脚、预览) */}
-            {activeStyleTab === 'theme' && (
-              <div
-                className="morph-drawer-panel"
-                role="tabpanel"
-                data-testid="style-panel-theme"
-                aria-label="主题设置面板"
-              >
-                <div className="morph-style-section" data-section="theme">
-                  <div className="morph-section-header">
-                    <h3 className="morph-section-label">主题预设</h3>
-                    <span className="morph-section-hint">
-                      {THEME_PRESETS[activePresetId].description}
-                    </span>
-                  </div>
-                  <div className="morph-preset-grid">
-                    {(Object.keys(THEME_PRESETS) as ThemePresetId[]).map((presetKey) => {
-                      const preset = THEME_PRESETS[presetKey];
-                      const isActive = activePresetId === presetKey;
-                      return (
-                        <button
-                          key={presetKey}
-                          type="button"
-                          className={`morph-preset-card ${isActive ? 'is-active' : ''}`}
-                          data-testid={`preset-card-${presetKey}`}
-                          aria-pressed={isActive ? 'true' : 'false'}
-                          onClick={() => void handleSelectPreset(presetKey)}
-                        >
-                          <div
-                            className="morph-preset-thumb"
-                            style={
-                              {
-                                '--preset-bg': preset.previewBg,
-                                '--preset-ink': preset.darkPreview ? '#e2e8f0' : preset.previewInk,
-                                '--preset-accent': preset.previewAccent,
-                              } as React.CSSProperties
-                            }
-                            aria-hidden="true"
-                          >
-                            <span className="morph-preset-line" />
-                            <span className="morph-preset-line" />
-                            <span className="morph-preset-line short" />
-                          </div>
-                          <span className="morph-preset-name">{preset.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="morph-style-section" data-section="accent">
-                  <h3 className="morph-section-label">主题色</h3>
-                  <div className="morph-swatch-row">
-                    <div className="morph-swatches" role="group" aria-label="Notion 主题色板">
-                      {NOTION_ACCENT_SWATCHES.map((swatch) => {
-                        const isSelected =
-                          tokens['--morph-accent'].toLowerCase() === swatch.hex.toLowerCase();
-                        return (
-                          <button
-                            key={swatch.hex}
-                            type="button"
-                            className={`morph-swatch-btn ${isSelected ? 'is-active' : ''}`}
-                            data-testid={`accent-swatch-${swatch.hex}`}
-                            aria-label={swatch.label}
-                            title={`${swatch.label} (${swatch.hex})`}
-                            style={{ '--swatch-color': swatch.hex } as React.CSSProperties}
-                            onClick={() => void handleAccentChange(swatch.hex)}
-                          />
-                        );
-                      })}
-                    </div>
-                    <input
-                      type="text"
-                      className="morph-hex-input"
-                      data-testid="accent-hex-input"
-                      aria-label="主题色十六进制值"
-                      value={tokens['--morph-accent']}
-                      onChange={(e) => void handleAccentChange(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="morph-style-section" data-section="paper">
-                  <div className="morph-section-header">
-                    <h3 className="morph-section-label">画布与纸张底色</h3>
-                    <span className="morph-section-hint">{tokens['--morph-bg']}</span>
-                  </div>
-                  <div className="morph-paper-grid">
-                    {PAPER_SURFACE_PRESETS.map((paper) => {
-                      const isActive =
-                        tokens['--morph-bg'].toLowerCase() === paper.bg.toLowerCase();
-                      return (
-                        <button
-                          key={paper.id}
-                          type="button"
-                          className={`morph-paper-btn ${isActive ? 'is-active' : ''}`}
-                          data-testid={`paper-preset-${paper.id}`}
-                          aria-pressed={isActive ? 'true' : 'false'}
-                          onClick={() => void handleSelectPaperPreset(paper.id)}
-                        >
-                          <span
-                            className="morph-paper-dot"
-                            style={{ backgroundColor: paper.bg }}
-                            aria-hidden="true"
-                          />
-                          <span>{paper.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="morph-style-section" data-section="decorations">
-                  <h3 className="morph-section-label">组件视觉风格</h3>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-heading-style-select">
-                      二级标题
-                    </label>
-                    <select
-                      id="morph-heading-style-select"
-                      className="morph-field-select"
-                      data-testid="heading-style-select"
-                      value={tuning.headingStyle}
-                      onChange={(e) =>
-                        void applyTuningPatch({
-                          headingStyle: e.target.value as HeadingStyleId,
-                        })
-                      }
-                    >
-                      {HEADING_STYLE_OPTIONS.map((opt) => (
-                        <option key={opt.id} value={opt.id}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-quote-style-select">
-                      引用容器
-                    </label>
-                    <select
-                      id="morph-quote-style-select"
-                      className="morph-field-select"
-                      data-testid="quote-style-select"
-                      value={tuning.quoteStyle}
-                      onChange={(e) =>
-                        void applyTuningPatch({
-                          quoteStyle: e.target.value as QuoteStyleId,
-                        })
-                      }
-                    >
-                      {QUOTE_STYLE_OPTIONS.map((opt) => (
-                        <option key={opt.id} value={opt.id}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-image-radius-select">
-                      插图圆角
-                    </label>
-                    <select
-                      id="morph-image-radius-select"
-                      className="morph-field-select"
-                      data-testid="image-radius-select"
-                      value={tuning.imageRadius}
-                      onChange={(e) =>
-                        void applyTuningPatch({
-                          imageRadius: e.target.value as ImageRadiusId,
-                        })
-                      }
-                    >
-                      {IMAGE_RADIUS_OPTIONS.map((opt) => (
-                        <option key={opt.id} value={opt.id}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="morph-style-section" data-section="card-branding">
-                  <div className="morph-section-header">
-                    <h3 className="morph-section-label">卡片画布装修</h3>
-                    <span className="morph-section-hint">图文卡片视图</span>
-                  </div>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-card-header-input">
-                      页眉署名
-                    </label>
-                    <input
-                      id="morph-card-header-input"
-                      type="text"
-                      className="morph-field-input"
-                      data-testid="card-header-input"
-                      value={tuning.cardHeaderText}
-                      placeholder="MorphMD"
-                      onChange={(e) => void handleCardHeaderChange(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-card-footer-select">
-                      页码格式
-                    </label>
-                    <select
-                      id="morph-card-footer-select"
-                      className="morph-field-select"
-                      data-testid="card-footer-select"
-                      value={tuning.cardFooterMode}
-                      onChange={(e) =>
-                        void applyTuningPatch({
-                          cardFooterMode: e.target.value as StyleTuningState['cardFooterMode'],
-                        })
-                      }
-                    >
-                      <option value="slash">1 / N 极简斜杠</option>
-                      <option value="verbose">第 1 页 · 共 N 页</option>
-                      <option value="hidden">隐藏底部页码</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="morph-style-section">
-                  <h3 className="morph-section-label">预览效果</h3>
-                  <div
-                    className="morph-mini-preview"
-                    data-testid="typography-mini-preview"
-                    style={{
-                      backgroundColor: tokens['--morph-bg'],
-                      color: tokens['--morph-ink'],
-                      borderLeft: `3px solid ${tokens['--morph-accent']}`,
-                    }}
-                  >
-                    <span className="morph-mini-aa" style={{ color: tokens['--morph-accent'] }}>
-                      Aa
-                    </span>
-                    <div className="morph-mini-lines" style={{ color: tokens['--morph-ink'] }}>
-                      <span>永远相信美好的事情即将发生</span>
-                      <span className="morph-mini-sub">The best is yet to come.</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB PANEL 2: TYPOGRAPHY (字体组合、基础排版、标题与段落细节、代码与列表、预览) */}
-            {activeStyleTab === 'typography' && (
-              <div
-                className="morph-drawer-panel"
-                role="tabpanel"
-                data-testid="style-panel-typography"
-                aria-label="排版设置面板"
-              >
-                <div className="morph-style-section" data-section="fonts">
-                  <h3 className="morph-section-label">字体组合</h3>
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-font-sans-select">
-                      中文字体
-                    </label>
-                    <select
-                      id="morph-font-sans-select"
-                      className="morph-field-select"
-                      data-testid="font-sans-select"
-                      value={tokens['--morph-font-sans']}
-                      onChange={(e) =>
-                        void applyTokenPatch({ '--morph-font-sans': e.target.value }, false)
-                      }
-                    >
-                      {FONT_SANS_OPTIONS.map((opt) => (
-                        <option key={opt.label} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-font-serif-select">
-                      西文字体
-                    </label>
-                    <select
-                      id="morph-font-serif-select"
-                      className="morph-field-select"
-                      data-testid="font-serif-select"
-                      value={tokens['--morph-font-serif']}
-                      onChange={(e) =>
-                        void applyTokenPatch({ '--morph-font-serif': e.target.value }, false)
-                      }
-                    >
-                      {FONT_SERIF_OPTIONS.map((opt) => (
-                        <option key={opt.label} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-font-mono-select">
-                      等宽字体
-                    </label>
-                    <select
-                      id="morph-font-mono-select"
-                      className="morph-field-select"
-                      data-testid="font-mono-select"
-                      value={tokens['--morph-font-mono']}
-                      onChange={(e) =>
-                        void applyTokenPatch({ '--morph-font-mono': e.target.value }, false)
-                      }
-                    >
-                      {FONT_MONO_OPTIONS.map((opt) => (
-                        <option key={opt.label} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="morph-style-section" data-section="typography">
-                  <h3 className="morph-section-label">基础排版</h3>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-body-size-input">
-                      字号
-                    </label>
-                    <div className="morph-slider-group">
-                      <input
-                        type="range"
-                        className="morph-range"
-                        min={12}
-                        max={22}
-                        step={1}
-                        aria-label="字号滑块"
-                        value={bodySizePx}
-                        onChange={(e) => void handleBodySizeChange(`${e.target.value}px`)}
-                      />
-                      <input
-                        id="morph-body-size-input"
-                        type="text"
-                        className="morph-value-input"
-                        data-testid="body-size-input"
-                        value={tokens['--morph-body-size']}
-                        onChange={(e) => void handleBodySizeChange(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-line-height-input">
-                      行高
-                    </label>
-                    <div className="morph-slider-group">
-                      <input
-                        type="range"
-                        className="morph-range"
-                        min={1.3}
-                        max={2.2}
-                        step={0.05}
-                        aria-label="行高滑块"
-                        value={parseFloat(tokens['--morph-line-height']) || 1.8}
-                        onChange={(e) => void handleLineHeightChange(e.target.value)}
-                      />
-                      <input
-                        id="morph-line-height-input"
-                        type="text"
-                        className="morph-value-input"
-                        data-testid="line-height-input"
-                        value={tokens['--morph-line-height']}
-                        onChange={(e) => void handleLineHeightChange(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-block-gap-input">
-                      段落间距
-                    </label>
-                    <div className="morph-slider-group">
-                      <input
-                        type="range"
-                        className="morph-range"
-                        min={8}
-                        max={32}
-                        step={2}
-                        aria-label="段落间距滑块"
-                        value={blockGapPx}
-                        onChange={(e) => void handleBlockGapChange(`${e.target.value}px`)}
-                      />
-                      <input
-                        id="morph-block-gap-input"
-                        type="text"
-                        className="morph-value-input"
-                        data-testid="block-gap-input"
-                        value={tokens['--morph-block-gap']}
-                        onChange={(e) => void handleBlockGapChange(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="morph-style-section" data-section="paragraph-details">
-                  <h3 className="morph-section-label">段落与字距细节</h3>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-heading-scale-select">
-                      标题倍率
-                    </label>
-                    <select
-                      id="morph-heading-scale-select"
-                      className="morph-field-select"
-                      data-testid="heading-scale-select"
-                      value={tuning.headingScale}
-                      onChange={(e) =>
-                        void applyTuningPatch({
-                          headingScale: e.target.value as HeadingScaleId,
-                        })
-                      }
-                    >
-                      {HEADING_SCALE_OPTIONS.map((opt) => (
-                        <option key={opt.id} value={opt.id}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-letter-spacing-input">
-                      正文字距
-                    </label>
-                    <div className="morph-slider-group">
-                      <input
-                        type="range"
-                        className="morph-range"
-                        min={0}
-                        max={2}
-                        step={0.2}
-                        aria-label="字距滑块"
-                        value={parseFloat(tuning.letterSpacing) || 0}
-                        onChange={(e) => void handleLetterSpacingChange(`${e.target.value}px`)}
-                      />
-                      <input
-                        id="morph-letter-spacing-input"
-                        type="text"
-                        className="morph-value-input"
-                        data-testid="letter-spacing-input"
-                        value={tuning.letterSpacing}
-                        onChange={(e) => void handleLetterSpacingChange(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="morph-field-row">
-                    <span className="morph-field-label">正文对齐</span>
-                    <div className="morph-segmented-row" role="group" aria-label="正文对齐方式">
-                      <button
-                        type="button"
-                        className={`morph-seg-btn ${tuning.textAlign === 'left' ? 'is-active' : ''}`}
-                        data-testid="text-align-left"
-                        onClick={() => void applyTuningPatch({ textAlign: 'left' })}
-                      >
-                        左对齐
-                      </button>
-                      <button
-                        type="button"
-                        className={`morph-seg-btn ${tuning.textAlign === 'justify' ? 'is-active' : ''}`}
-                        data-testid="text-align-justify"
-                        onClick={() => void applyTuningPatch({ textAlign: 'justify' })}
-                      >
-                        两端对齐
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="morph-field-row">
-                    <span className="morph-field-label">首行缩进</span>
-                    <div className="morph-segmented-row" role="group" aria-label="首行缩进设置">
-                      <button
-                        type="button"
-                        className={`morph-seg-btn ${!tuning.paragraphIndent ? 'is-active' : ''}`}
-                        onClick={() => void applyTuningPatch({ paragraphIndent: false })}
-                      >
-                        无缩进
-                      </button>
-                      <button
-                        type="button"
-                        className={`morph-seg-btn ${tuning.paragraphIndent ? 'is-active' : ''}`}
-                        data-testid="paragraph-indent-toggle"
-                        aria-pressed={tuning.paragraphIndent ? 'true' : 'false'}
-                        onClick={() =>
-                          void applyTuningPatch({ paragraphIndent: !tuning.paragraphIndent })
-                        }
-                      >
-                        缩进 2 字符
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="morph-style-section" data-section="code-and-list">
-                  <h3 className="morph-section-label">代码与列表排版</h3>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-code-size-select">
-                      代码字号
-                    </label>
-                    <select
-                      id="morph-code-size-select"
-                      className="morph-field-select"
-                      data-testid="code-size-select"
-                      value={tuning.codeSize}
-                      onChange={(e) => void applyTuningPatch({ codeSize: e.target.value })}
-                    >
-                      <option value="12px">紧凑 (12px)</option>
-                      <option value="13px">标准 (13px)</option>
-                      <option value="14px">舒适 (14px)</option>
-                      <option value="15px">醒目 (15px)</option>
-                    </select>
-                  </div>
-
-                  <div className="morph-field-row">
-                    <label className="morph-field-label" htmlFor="morph-list-gap-select">
-                      列表间距
-                    </label>
-                    <select
-                      id="morph-list-gap-select"
-                      className="morph-field-select"
-                      data-testid="list-gap-select"
-                      value={tuning.listGap}
-                      onChange={(e) => void applyTuningPatch({ listGap: e.target.value })}
-                    >
-                      <option value="4px">紧凑 (4px)</option>
-                      <option value="6px">标准 (6px)</option>
-                      <option value="10px">宽松 (10px)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="morph-style-section">
-                  <h3 className="morph-section-label">排版节奏预览</h3>
-                  <div className="morph-mini-preview" data-testid="typography-mini-preview">
-                    <span className="morph-mini-aa">Aa</span>
-                    <div
-                      className="morph-mini-lines"
-                      style={{
-                        lineHeight: tokens['--morph-line-height'],
-                        letterSpacing: tuning.letterSpacing,
-                      }}
-                    >
-                      <span>永远相信美好的事情即将发生</span>
-                      <span className="morph-mini-sub">
-                        字号 {tokens['--morph-body-size']} · 行高 {tokens['--morph-line-height']} · 段距{' '}
-                        {tokens['--morph-block-gap']}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB PANEL 3: CUSTOM CSS (In-place Drill-down Navigation: 列表层 <-> 原地右滑编辑层) */}
-            {activeStyleTab === 'css' && (
-              <div
-                className="morph-drawer-panel"
-                role="tabpanel"
-                data-testid="style-panel-css"
-                data-view-mode={cssViewMode}
-                aria-label="自定义 CSS 面板"
-              >
+            {/* CUSTOM CSS PANEL (In-place Drill-down Navigation: 列表层 <-> 原地右滑编辑层) */}
+            <div
+              className="morph-drawer-panel"
+              role="region"
+              data-testid="style-panel-css"
+              data-view-mode={cssViewMode}
+              aria-label="自定义 CSS 面板"
+            >
                 <div className="morph-css-slider-viewport">
                   <div
                     className={`morph-css-slider-track ${cssViewMode === 'editor' ? 'is-editor' : ''}`}
@@ -2474,7 +1669,6 @@ export const App: React.FC<AppProps> = ({
                   </div>
                 </div>
               </div>
-            )}
           </div>
         </aside>
       </main>

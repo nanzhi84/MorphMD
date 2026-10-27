@@ -52,7 +52,9 @@ export function transformCallouts(tree: Root): void {
 
       if (isCallout) {
         const bodyChildren = [...node.children].filter(
-          (c) => !(c.type === 'element' && c.tagName === 'p' && c.children.length === 0)
+          (c) =>
+            !(c.type === 'element' && c.tagName === 'p' && c.children.length === 0) &&
+            !(c.type === 'text' && c.value.trim() === '')
         );
 
         const calloutElement: Element = {

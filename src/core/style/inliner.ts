@@ -78,10 +78,76 @@ ${tokenCssLines}
       font-size: var(--morph-body-size);
       line-height: var(--morph-line-height);
     }
-    .morph-h1 { font-family: var(--morph-font-serif); }
-    .morph-h2 { font-family: var(--morph-font-serif); }
-    .morph-h3 { font-family: var(--morph-font-serif); }
-    .morph-p { margin-bottom: var(--morph-block-gap); line-height: var(--morph-line-height); }
+    .morph-h1 {
+      font-family: var(--morph-font-serif);
+      font-size: 28px;
+      line-height: 1.38;
+      font-weight: 700;
+      margin-top: 0px;
+      margin-bottom: 20px;
+    }
+    .morph-h2 {
+      font-family: var(--morph-font-serif);
+      font-size: 22px;
+      line-height: 1.4;
+      font-weight: 600;
+      margin-top: 28px;
+      margin-bottom: 14px;
+    }
+    .morph-h3 {
+      font-family: var(--morph-font-serif);
+      font-size: 18px;
+      line-height: 1.42;
+      font-weight: 600;
+      margin-top: 22px;
+      margin-bottom: 10px;
+    }
+    .morph-h4 {
+      font-family: var(--morph-font-serif);
+      font-size: 16px;
+      line-height: 1.45;
+      font-weight: 600;
+      margin-top: 18px;
+      margin-bottom: 8px;
+    }
+    .morph-p {
+      margin-top: 0px;
+      margin-bottom: var(--morph-block-gap);
+      line-height: var(--morph-line-height);
+    }
+    .morph-quote {
+      margin-top: 0px;
+      margin-right: 0px;
+      margin-bottom: 18px;
+      margin-left: 0px;
+    }
+    .morph-quote .morph-p,
+    .morph-quote p {
+      margin-top: 0px;
+      margin-bottom: 0px;
+    }
+    .morph-quote .morph-p + .morph-p,
+    .morph-quote p + p {
+      margin-top: 8px;
+    }
+    .morph-img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 8px;
+      margin-top: 0px;
+      margin-bottom: 16px;
+    }
+    .morph-p > .morph-img {
+      margin-bottom: 0px;
+    }
+    .morph-math-display {
+      display: block;
+      text-align: center;
+      margin-top: 0px;
+      margin-bottom: 16px;
+      overflow-x: auto;
+    }
     .morph-code { font-family: var(--morph-font-mono); overflow-x: auto; }
     ${analysis.sanitizedCss}
   `;
@@ -364,11 +430,31 @@ ${tokenCssLines}
             if (recordedProps) recordedProps.push(['border', computedBorder]);
           }
 
+          // white-space shorthand preservation (modern Chromium expands white-space into white-space-collapse & text-wrap-mode)
+          const ruleWhiteSpace = rule.style.getPropertyValue('white-space');
+          if (ruleWhiteSpace) {
+            const computedWhiteSpace = computed.getPropertyValue('white-space') || ruleWhiteSpace;
+            elStyleMap.set('white-space', computedWhiteSpace);
+            if (recordedProps) recordedProps.push(['white-space', computedWhiteSpace]);
+          }
+
+          // text-decoration shorthand preservation (modern Chromium expands text-decoration into text-decoration-line/style/color)
+          const ruleTextDecoration = rule.style.getPropertyValue('text-decoration');
+          if (ruleTextDecoration) {
+            elStyleMap.set('text-decoration', ruleTextDecoration);
+            if (recordedProps) recordedProps.push(['text-decoration', ruleTextDecoration]);
+          }
+
           for (let i = 0; i < rule.style.length; i++) {
             const prop = rule.style[i];
             if (prop.startsWith('--')) continue;
 
-            let val = computed.getPropertyValue(prop) || rule.style.getPropertyValue(prop);
+            const authoredVal = rule.style.getPropertyValue(prop);
+            let val =
+              ((prop === 'width' || prop === 'height' || prop === 'max-width' || prop === 'max-height') && authoredVal) ||
+              (authoredVal && authoredVal.includes('var('))
+                ? authoredVal
+                : computed.getPropertyValue(prop) || authoredVal;
 
             if (prop === 'position' && /\bfixed\b/i.test(val)) {
               hadRuleDiagnostic = true;
@@ -559,7 +645,15 @@ ${tokenCssLines}
         }
         for (const p of currentProps) {
           const isPropAllowed =
-            allowed.has(p) || (allowed.has('border') && (p === 'border' || p.startsWith('border-')));
+            allowed.has(p) ||
+            (allowed.has('border') && (p === 'border' || p.startsWith('border-'))) ||
+            (allowed.has('text-decoration') &&
+              (p === 'text-decoration' || p.startsWith('text-decoration-'))) ||
+            (allowed.has('white-space') &&
+              (p === 'white-space' ||
+                p === 'white-space-collapse' ||
+                p === 'text-wrap-mode' ||
+                p === 'text-wrap'));
           if (!isPropAllowed) {
             el.style.removeProperty(p);
             removedAny = true;

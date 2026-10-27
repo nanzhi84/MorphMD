@@ -516,6 +516,20 @@ body,
   transition: max-width 0.18s ease;
 }
 
+/* 微信公众号视图：对齐公众号后台编辑器 585px 正文宽度 (720px - 2px - 2*66.5px = 585px) 并禁用垂直外边距折叠 */
+.morph-preview-stage[data-target-view="wechat"] {
+  padding: 36px 66.5px;
+}
+
+.morph-preview-stage[data-target-view="wechat"][style*="375px"] {
+  padding: 24px 16px;
+}
+
+.morph-preview-stage[data-target-view="wechat"] .morph-doc {
+  display: flex;
+  flex-direction: column;
+}
+
 .morph-preview-stage[data-target-view="cards"] {
   max-width: 100%;
   background: transparent;
@@ -568,7 +582,44 @@ body,
   height: auto;
   border-radius: 8px;
   display: block;
-  margin: 14px 0;
+  margin: 0 0 18px 0;
+}
+
+.morph-preview-stage p > img {
+  margin-top: 0px;
+  margin-bottom: 0px;
+}
+
+.morph-preview-stage blockquote,
+.morph-preview-stage .morph-quote {
+  margin: 0 0 20px 0;
+  margin-left: 0px;
+  margin-right: 0px;
+}
+
+.morph-preview-stage blockquote p,
+.morph-preview-stage .morph-quote p {
+  margin-top: 0px;
+  margin-bottom: 0px;
+}
+
+.morph-preview-stage blockquote p + p,
+.morph-preview-stage .morph-quote p + p {
+  margin-top: 8px;
+}
+
+.morph-preview-stage .morph-math-display {
+  display: block;
+  text-align: center;
+  margin-top: 0px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+
+.morph-preview-stage .morph-math-display > svg {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* X Articles (x-article) Platform-Native Typography Simulation */
