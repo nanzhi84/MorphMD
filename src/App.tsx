@@ -481,28 +481,6 @@ export const App: React.FC<AppProps> = ({
     [applyMarkdownInput]
   );
 
-  const insertSnippetAndCommit = useCallback(
-    async (snippet: string) => {
-      const base = session.getDraftMarkdown() || markdown;
-      const prefix = base.endsWith('\n') || base.length === 0 ? '' : '\n\n';
-      const nextMd = `${base}${prefix}${snippet}\n`;
-      setMarkdown(nextMd);
-      const snap = await session.commitDoc(nextMd);
-      setSnapshot(snap);
-      setIsSaving(false);
-    },
-    [markdown, session]
-  );
-
-  const handleInsertSampleImage = useCallback(async () => {
-    const rec = store.ingestSync(createShowcaseCoverPng(), {
-      fileName: 'inserted-cover.png',
-      mimeType: 'image/png',
-    });
-    setAssetTick((t) => t + 1);
-    await insertSnippetAndCommit(`![插图](${rec.uri})`);
-  }, [insertSnippetAndCommit, store]);
-
   const handleEditorPaste = useCallback(
     async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const clipData = e.clipboardData;
@@ -1186,77 +1164,6 @@ export const App: React.FC<AppProps> = ({
                 <span className="morph-save-dot" aria-hidden="true" />
                 {isSaving ? '编译中...' : '已保存'}
               </span>
-            </div>
-
-            <div className="morph-format-toolbar" role="toolbar" aria-label="Markdown 快捷格式工具栏">
-              <button
-                type="button"
-                className="morph-tool-btn"
-                data-testid="toolbar-insert-image"
-                aria-label="插入图片"
-                title="插入图片 (morph-asset://)"
-                onClick={() => void handleInsertSampleImage()}
-              >
-                🖼
-              </button>
-              <button
-                type="button"
-                className="morph-tool-btn"
-                data-testid="toolbar-insert-link"
-                aria-label="插入链接"
-                title="插入链接"
-                onClick={() => void insertSnippetAndCommit('[链接文本](https://morphmd.dev)')}
-              >
-                🔗
-              </button>
-              <button
-                type="button"
-                className="morph-tool-btn"
-                data-testid="toolbar-insert-table"
-                aria-label="插入表格"
-                title="插入 GFM 表格"
-                onClick={() =>
-                  void insertSnippetAndCommit(
-                    '| 视图目标 | 排版特性 | 输出结果 |\n| :--- | :--- | :--- |\n| 微信公众号 | 受控 CSS 内联 | 富文本复制 |\n| 图文卡片 | 多比例分页 | PNG / ZIP |'
-                  )
-                }
-              >
-                ⊞
-              </button>
-              <button
-                type="button"
-                className="morph-tool-btn"
-                data-testid="toolbar-insert-ul"
-                aria-label="插入无序列表"
-                title="插入无序列表"
-                onClick={() => void insertSnippetAndCommit('- 列表项一\n- 列表项二')}
-              >
-                •
-              </button>
-              <button
-                type="button"
-                className="morph-tool-btn"
-                data-testid="toolbar-insert-ol"
-                aria-label="插入有序列表"
-                title="插入有序列表"
-                onClick={() => void insertSnippetAndCommit('1. 第一步\n2. 第二步')}
-              >
-                1.
-              </button>
-              <button
-                type="button"
-                className="morph-tool-btn"
-                data-testid="toolbar-insert-code"
-                aria-label="插入代码块"
-                title="插入代码块"
-                onClick={() =>
-                  void insertSnippetAndCommit(
-                    '```ts\nconst snapshot = await buildDeliverySnapshot(md, "wechat", store);\n```'
-                  )
-                }
-              >
-                {'<>'}
-              </button>
             </div>
           </div>
 

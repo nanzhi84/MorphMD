@@ -530,6 +530,31 @@ export function serializeFullSnapshot(
     const diagnostics: DiagnosticItem[] = [...snapshot.diagnostics];
     replaceAssetsAndFormulas(container, doc, snapshot, assetStore, unresolvedAssetIds, diagnostics);
 
+    // Propagate rootContainer's inheritable typography styles onto direct children so that
+    // if the target editor (e.g. WeChat ProseMirror) unwraps <div class="morph-doc">,
+    // top-level blocks retain explicit font-size, font-family, line-height, and color.
+    const rootStyle = (container as HTMLElement).style;
+    if (rootStyle) {
+      const inheritableProps = [
+        'font-size',
+        'color',
+        'font-family',
+        'line-height',
+        'letter-spacing',
+      ];
+      Array.from(container.children).forEach((child) => {
+        if (child.nodeType === 1) {
+          const el = child as HTMLElement;
+          for (const prop of inheritableProps) {
+            const rootVal = rootStyle.getPropertyValue(prop);
+            if (rootVal && !el.style.getPropertyValue(prop)) {
+              el.style.setProperty(prop, rootVal);
+            }
+          }
+        }
+      });
+    }
+
     const html = (container.classList && container.classList.contains('morph-doc'))
       ? container.outerHTML
       : container.innerHTML;

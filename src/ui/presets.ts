@@ -264,6 +264,7 @@ const BASE_THEME_ACCENT_CSS = `
   --claude-text-secondary: #666560;
   --claude-border: #E2DFD7;
   --claude-accent: #C86446;
+  --claude-accent-muted: #8C5A4B;
 
   /* 衬线栈：西文用 Newsreader，中文强制用思源宋体或系统宋体 */
   --font-serif: 'Newsreader', 'Noto Serif SC', 'Songti SC', 'STSong', serif;
@@ -273,17 +274,17 @@ const BASE_THEME_ACCENT_CSS = `
   --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
 }
 
-/* Markdown 核心渲染容器 (.morph-doc / .claude-prose)：去除局部背景色块 */
+/* Markdown 核心渲染容器 (.morph-doc / .claude-prose)：跨端黄金字号 15px / 1.75 行高 */
 .morph-doc,
 .claude-prose {
   font-family: var(--font-sans);
-  font-size: 16px;
-  line-height: 1.8;
+  font-size: 15px;
+  line-height: 1.75;
   letter-spacing: 0.01em;
   color: var(--claude-text-primary);
 }
 
-/* 标题：严格使用衬线体，禁止粗体导致的黑体化 */
+/* 标题：严格使用衬线体，兼顾移动端与桌面端层级比例 */
 .morph-h1,
 .morph-h2,
 .claude-prose h1,
@@ -296,49 +297,53 @@ const BASE_THEME_ACCENT_CSS = `
 
 .morph-h1,
 .claude-prose h1 {
-  font-size: 36px;
-  line-height: 1.3;
+  font-size: 24px;
+  line-height: 1.35;
   margin-top: 0px;
-  margin-bottom: 20px;
+  margin-bottom: 22px;
 }
 
 .morph-h2,
 .claude-prose h2 {
-  font-size: 24px;
+  font-size: 20px;
   line-height: 1.4;
-  margin-top: 24px;
-  margin-bottom: 14px;
+  margin-top: 28px;
+  margin-bottom: 16px;
 }
 
 /* H3 采用无衬线紧凑排版，与 H1/H2 形成材质对比 */
 .morph-h3,
 .claude-prose h3 {
   font-family: var(--font-sans);
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
-  line-height: 1.5;
-  margin-top: 16px;
-  margin-bottom: 10px;
+  line-height: 1.45;
+  margin-top: 22px;
+  margin-bottom: 12px;
   color: #141413;
 }
 
 .morph-h4,
 .claude-prose h4 {
   font-family: var(--font-sans);
-  font-size: 16px;
+  font-size: 15.5px;
   line-height: 1.45;
   font-weight: 600;
   color: #141413;
-  margin-top: 12px;
+  margin-top: 16px;
   margin-bottom: 8px;
 }
 
-/* 段落与行内样式：统一采用单向底边距 (margin-top: 0px)，消除微信非折叠容器下的双倍间距叠加 */
+/* 段落与行内样式：显式内联字号、字体与字色，防止公众号剥离顶层 .morph-doc 后回退 17px 默认字号 */
 .morph-p,
 .claude-prose p {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.75;
+  letter-spacing: 0.01em;
+  color: var(--claude-text-primary);
   margin-top: 0px;
-  margin-bottom: 20px;
-  line-height: 1.8;
+  margin-bottom: 16px;
 }
 
 strong,
@@ -347,17 +352,16 @@ strong,
   color: #141413;
 }
 
-/* 彻底禁用中文伪斜体，改用衬线体切换与克制强调色实现强调（去除难看的虚线下划线） */
+/* 斜体保持真实 italic，采用偏灰暗的低饱和主题同色系 (--claude-accent-muted: #8C5A4B) */
 em,
 .claude-prose em {
-  font-style: normal;
-  font-family: var(--font-serif);
-  color: var(--claude-accent);
+  font-style: italic;
+  color: var(--claude-accent-muted);
 }
 
 a,
 .claude-prose a {
-  color: var(--claude-text-primary);
+  color: var(--claude-accent);
   text-decoration: none;
   border-bottom: 1px solid var(--claude-accent);
   padding-bottom: 1px;
@@ -368,66 +372,79 @@ a:hover,
   color: var(--claude-accent);
 }
 
-/* 引用块：取消 italic 伪斜体，使用正体衬线体与 2px 陶土色左边框，单向底边距 */
+/* 引用块：正体衬线体与 2px 陶土色左边框，单向底边距 */
 .morph-quote,
 .claude-prose blockquote {
   margin-top: 0px;
   margin-right: 0px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   margin-left: 0px;
-  padding: 4px 0px 4px 20px;
+  padding: 4px 0px 4px 16px;
   border-left: 2px solid var(--claude-accent);
   background-color: transparent;
   font-family: var(--font-serif);
   font-style: normal;
-  font-size: 16.8px;
-  line-height: 1.75;
+  font-size: 15px;
+  line-height: 1.7;
   color: #3D3C3A;
 }
 
 .morph-quote .morph-p,
 .morph-quote p,
 .claude-prose blockquote p {
+  font-family: var(--font-serif);
+  font-style: normal;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #3D3C3A;
   margin-top: 0px;
   margin-bottom: 0px;
 }
 
 .morph-quote .morph-p + .morph-p,
 .morph-quote p + p {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 /* 列表 */
 .morph-list,
 .claude-prose ul,
 .claude-prose ol {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--claude-text-primary);
   margin-top: 0px;
-  margin-bottom: 20px;
-  padding-left: 24px;
+  margin-bottom: 16px;
+  padding-left: 22px;
 }
 
 .morph-list li,
 .claude-prose li {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.75;
+  letter-spacing: 0.01em;
+  color: var(--claude-text-primary);
   margin-top: 0px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   padding-left: 4px;
-  line-height: 1.8;
 }
 
 /* 修复行内代码跨行折断与等宽字体丢失问题 */
 :not(pre) > code,
 .claude-prose :not(pre) > code {
   font-family: var(--font-mono) !important;
-  font-size: 13.6px;
+  font-size: 13px;
   background-color: #EAE6DF;
   color: #2C2B29;
-  padding: 2.4px 6.4px;
+  padding: 2px 5px;
   border-radius: 4px;
   white-space: nowrap;
   vertical-align: baseline;
 }
 
-/* 修复代码块字体与高饱和度配色冲突，单向底边距 */
+/* 代码块：显式声明 white-space: pre 与 text-align: left，防止移动端折行与两端对齐拉伸 */
 pre.morph-code,
 .claude-prose pre {
   font-family: var(--font-mono) !important;
@@ -435,12 +452,16 @@ pre.morph-code,
   color: #2C2B29 !important;
   border: 1px solid var(--claude-border);
   border-radius: 6px;
-  padding: 18px 20px;
+  padding: 14px 16px;
   margin-top: 0px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   overflow-x: auto;
-  line-height: 1.6;
-  font-size: 14px;
+  white-space: pre;
+  text-align: left;
+  word-break: normal;
+  overflow-wrap: normal;
+  line-height: 1.55;
+  font-size: 13px;
 }
 
 pre.morph-code code,
@@ -450,41 +471,62 @@ pre.morph-code code,
   padding: 0px;
   border-radius: 0px;
   white-space: pre;
+  text-align: left;
+  word-break: normal;
+  overflow-wrap: normal;
   color: #2C2B29;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
-/* 修复 Callout 提示框圆角与左边框打架以及底部多余留白的问题，单向底边距 */
+/* Callout 提示框：左直右圆切边 (0px 8px 8px 0px) 消除尖角畸变，统一使用紧凑无衬线体 */
 .morph-callout,
 .claude-prose .callout {
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--claude-text-primary);
   background-color: var(--claude-bg-secondary);
-  border: none;
   border-left: 3px solid var(--claude-accent);
-  border-radius: 0px;
-  padding: 18px 20px 18px 24px;
+  border-radius: 0px 8px 8px 0px;
+  padding: 14px 16px 14px 18px;
   margin-top: 0px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .morph-callout-title,
 .claude-prose .callout-title {
+  font-family: var(--font-sans);
   font-weight: 600;
-  font-size: 15.2px;
-  line-height: 1.5;
-  margin-bottom: 8px;
+  font-size: 14.5px;
+  line-height: 1.9;
+  margin-top: 0px;
+  margin-bottom: 6px;
   color: #141413;
+}
+
+.morph-callout-body {
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--claude-text-primary);
+  margin: 0px;
+  padding: 0px;
 }
 
 .morph-callout-body p,
 .morph-callout-body .morph-p,
 .morph-callout p:last-child,
 .claude-prose .callout p:last-child {
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--claude-text-primary);
   margin-top: 0px !important;
   margin-bottom: 0px !important;
 }
 
-/* 学术风三线表：固定列宽 (table-layout: fixed) 与单向底边距 (margin-top: 0px)，显式清除上/左/右边框 */
+/* 学术风三线表：固定列宽、13px 紧凑字号与 8px 6px 内边距，适配手机窄屏四列表格 */
 .morph-table,
 .claude-prose table {
   width: 100%;
@@ -499,9 +541,17 @@ pre.morph-code code,
   border-left-style: none;
   border-right-style: none;
   margin-top: 0px;
-  margin-bottom: 24px;
-  font-size: 15px;
+  margin-bottom: 20px;
+  font-size: 13px;
   line-height: 1.5;
+}
+
+.morph-table :not(pre) > code,
+.claude-prose table :not(pre) > code {
+  font-size: 12px;
+  padding: 1px 4px;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .morph-table thead,
@@ -524,7 +574,7 @@ pre.morph-code code,
 .claude-prose th {
   text-align: left;
   font-weight: 600;
-  padding: 12px 12px;
+  padding: 8px 6px;
   border-top: 0px solid transparent;
   border-left: 0px solid transparent;
   border-right: 0px solid transparent;
@@ -541,7 +591,7 @@ pre.morph-code code,
 .morph-table td,
 .claude-prose td {
   text-align: left;
-  padding: 12px 12px;
+  padding: 8px 6px;
   border-top: 0px solid transparent;
   border-left: 0px solid transparent;
   border-right: 0px solid transparent;
@@ -569,13 +619,13 @@ hr,
   border: none;
   border-top: 1px solid var(--claude-border);
   margin-top: 0px;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 figure,
 .claude-prose figure {
   margin-top: 0px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .morph-img,
@@ -587,7 +637,7 @@ figure,
   border: 1px solid rgba(20, 20, 19, 0.08);
   display: block;
   margin-top: 0px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .morph-p > .morph-img,
@@ -598,8 +648,8 @@ figure,
 
 figcaption,
 .claude-prose figcaption {
-  margin-top: 10px;
-  font-size: 14px;
+  margin-top: 8px;
+  font-size: 13px;
   color: var(--claude-text-secondary);
   line-height: 1.4;
 }
@@ -619,78 +669,81 @@ const YORYON_EDITORIAL_CSS = `
 
   /* Yoryon 书刊衬线栈：西文 Iowan Old Style / Palatino，中文宋体 / 思源宋体 */
   --yoryon-font-serif: 'Iowan Old Style', 'Iowan Old Style BT', 'Palatino Linotype', Palatino, Georgia, 'Songti SC', 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'SimSun', serif;
-  /* 辅助无衬线栈：用于图注与提示框眉题 */
+  /* 辅助无衬线栈：用于提示框与图注 */
   --yoryon-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', Arial, sans-serif;
   /* 等宽代码栈 */
   --yoryon-font-mono: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
 }
 
-/* Yoryon 核心阅读容器 (.morph-doc / .prose-yoryon)：全篇采用书刊衬线体，17px / 1.85 行高 */
+/* Yoryon 核心阅读容器 (.morph-doc / .prose-yoryon)：采用书刊衬线体，15px / 1.75 行高适配双端 */
 .morph-doc,
 .prose-yoryon {
   font-family: var(--yoryon-font-serif);
-  font-size: 17px;
-  line-height: 1.85;
+  font-size: 15px;
+  line-height: 1.75;
   font-weight: 400;
   letter-spacing: 0em;
   color: var(--yoryon-reading-fg);
 }
 
-/* 标题：沿用书刊衬线体，字重 600，H1 居中排版 */
+/* 标题：沿用书刊衬线体，字重 600，H1 居中排版，字号收敛适配手机端 */
 .morph-h1,
 .prose-yoryon h1 {
   font-family: var(--yoryon-font-serif);
-  font-size: 31px;
-  line-height: 1.38;
+  font-size: 24px;
+  line-height: 1.35;
   font-weight: 600;
   color: var(--yoryon-reading-fg);
   text-align: center;
   letter-spacing: 0em;
   margin-top: 0px;
-  margin-bottom: 28px;
+  margin-bottom: 22px;
 }
 
 .morph-h2,
 .prose-yoryon h2 {
   font-family: var(--yoryon-font-serif);
-  font-size: 23px;
+  font-size: 20px;
   line-height: 1.4;
   font-weight: 600;
   color: var(--yoryon-reading-fg);
   letter-spacing: 0em;
-  margin-top: 24px;
-  margin-bottom: 18px;
+  margin-top: 28px;
+  margin-bottom: 16px;
 }
 
 .morph-h3,
 .prose-yoryon h3 {
   font-family: var(--yoryon-font-serif);
-  font-size: 19px;
-  line-height: 1.4;
+  font-size: 17px;
+  line-height: 1.45;
   font-weight: 600;
   color: var(--yoryon-reading-fg);
-  margin-top: 18px;
-  margin-bottom: 14px;
+  margin-top: 22px;
+  margin-bottom: 12px;
 }
 
 .morph-h4,
 .prose-yoryon h4 {
   font-family: var(--yoryon-font-serif);
-  font-size: 17px;
+  font-size: 15.5px;
   line-height: 1.45;
   font-weight: 600;
   color: var(--yoryon-reading-fg);
-  margin-top: 14px;
+  margin-top: 16px;
   margin-bottom: 8px;
 }
 
-/* 段落与行内样式：单向底边距 (margin-top: 0px)，保障公众号与预览 1:1 所见即所得 */
+/* 段落与行内样式：显式内联字号、字体与字色，保障公众号与预览 1:1 所见即所得 */
 .morph-p,
 .prose-yoryon p {
-  margin-top: 0px;
-  margin-bottom: 20px;
-  line-height: 1.85;
+  font-family: var(--yoryon-font-serif);
+  font-size: 15px;
+  line-height: 1.75;
+  letter-spacing: 0em;
   color: var(--yoryon-reading-fg);
+  margin-top: 0px;
+  margin-bottom: 16px;
 }
 
 strong,
@@ -699,12 +752,11 @@ strong,
   color: var(--yoryon-reading-fg);
 }
 
-/* 中文强调禁用几何伪斜体，采用正体衬线 + Yoryon 石板蓝强调 */
+/* 斜体保持真实 italic，采用偏灰暗的低饱和石板蓝灰 (--yoryon-muted-fg: #607383) */
 em,
 .prose-yoryon em {
-  font-style: normal;
-  font-family: var(--yoryon-font-serif);
-  color: var(--yoryon-primary);
+  font-style: italic;
+  color: var(--yoryon-muted-fg);
 }
 
 a,
@@ -722,51 +774,65 @@ a,
   margin-right: 0px;
   margin-bottom: 20px;
   margin-left: 0px;
-  padding: 4px 0px 4px 18px;
+  padding: 4px 0px 4px 16px;
   border-left: 2px solid var(--yoryon-primary);
   background-color: transparent;
   font-family: var(--yoryon-font-serif);
   font-style: normal;
   font-weight: 400;
-  font-size: 17px;
-  line-height: 1.85;
+  font-size: 15px;
+  line-height: 1.7;
   color: var(--yoryon-foreground);
 }
 
 .morph-quote .morph-p,
 .morph-quote p,
 .prose-yoryon blockquote p {
+  font-family: var(--yoryon-font-serif);
+  font-style: normal;
+  font-weight: 400;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--yoryon-foreground);
   margin-top: 0px;
   margin-bottom: 0px;
 }
 
 .morph-quote .morph-p + .morph-p,
 .morph-quote p + p {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 /* 列表 */
 .morph-list,
 .prose-yoryon ul,
 .prose-yoryon ol {
+  font-family: var(--yoryon-font-serif);
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--yoryon-reading-fg);
   margin-top: 0px;
-  margin-bottom: 20px;
-  padding-left: 24px;
+  margin-bottom: 16px;
+  padding-left: 22px;
 }
 
 .morph-list li,
 .prose-yoryon li {
+  font-family: var(--yoryon-font-serif);
+  font-size: 15px;
+  line-height: 1.75;
+  letter-spacing: 0em;
+  color: var(--yoryon-reading-fg);
   margin-top: 0px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   padding-left: 4px;
-  line-height: 1.85;
 }
 
 /* 行内代码：复刻 yoryon.com #f3f3f2 浅暖灰底色与 #3d3936 深褐灰代码字色 */
 :not(pre) > code,
 .prose-yoryon :not(pre) > code {
   font-family: var(--yoryon-font-mono) !important;
-  font-size: 14.6px;
+  font-size: 13px;
   font-weight: 400;
   background-color: var(--yoryon-reading-surface);
   color: var(--yoryon-reading-code);
@@ -776,7 +842,7 @@ a,
   vertical-align: baseline;
 }
 
-/* 代码块：复刻 yoryon.com .prose-yoryon pre (#f3f3f2 底色 + 1px #dfeaf0 边框 + 4px 圆角) */
+/* 代码块：显式声明 white-space: pre 与 text-align: left，防止移动端折行与两端对齐拉伸 */
 pre.morph-code,
 .prose-yoryon pre {
   font-family: var(--yoryon-font-mono) !important;
@@ -784,11 +850,15 @@ pre.morph-code,
   color: var(--yoryon-reading-code) !important;
   border: 1px solid var(--yoryon-border);
   border-radius: 4px;
-  padding: 16px 18px;
+  padding: 14px 16px;
   margin-top: 0px;
   margin-bottom: 20px;
   overflow-x: auto;
-  line-height: 1.6;
+  white-space: pre;
+  text-align: left;
+  word-break: normal;
+  overflow-wrap: normal;
+  line-height: 1.55;
   font-size: 13px;
 }
 
@@ -799,43 +869,63 @@ pre.morph-code code,
   padding: 0px;
   border-radius: 0px;
   white-space: pre;
+  text-align: left;
+  word-break: normal;
+  overflow-wrap: normal;
   color: var(--yoryon-reading-code);
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.55;
 }
 
-/* 提示框 / 导读摘要框：复刻 yoryon.com .editorial-keypoints (#f3f3f2 底色 + 3px #47758f 左边框) */
+/* 提示框：左直右圆切边 (0px 8px 8px 0px) 消除尖角畸变，统一采用现代无衬线体与 1.65 紧凑行高 */
 .morph-callout,
 .prose-yoryon .editorial-keypoints {
+  font-family: var(--yoryon-font-sans);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--yoryon-reading-fg);
   background-color: var(--yoryon-reading-surface);
-  border: none;
   border-left: 3px solid var(--yoryon-primary);
-  border-radius: 6px;
-  padding: 18px 20px;
+  border-radius: 0px 8px 8px 0px;
+  padding: 14px 16px 14px 18px;
   margin-top: 0px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .morph-callout-title,
 .prose-yoryon .editorial-keypoints-header {
   font-family: var(--yoryon-font-sans);
   font-weight: 600;
-  font-size: 13px;
-  line-height: 1.6;
-  letter-spacing: 0.08em;
-  margin-bottom: 8px;
-  color: var(--yoryon-muted-fg);
+  font-size: 14.5px;
+  line-height: 1.9;
+  letter-spacing: 0.02em;
+  margin-top: 0px;
+  margin-bottom: 6px;
+  color: var(--yoryon-foreground);
+}
+
+.morph-callout-body {
+  font-family: var(--yoryon-font-sans);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--yoryon-reading-fg);
+  margin: 0px;
+  padding: 0px;
 }
 
 .morph-callout-body p,
 .morph-callout-body .morph-p,
 .morph-callout p:last-child,
 .prose-yoryon .editorial-keypoints p:last-child {
+  font-family: var(--yoryon-font-sans);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--yoryon-reading-fg);
   margin-top: 0px !important;
   margin-bottom: 0px !important;
 }
 
-/* 表格：复刻 yoryon.com --tw-prose-th-borders / --tw-prose-td-borders (#dfeaf0)，兼容公众号无网格线三线表 */
+/* 表格：13px 紧凑字号与 8px 6px 单元格内边距，适配手机端四列排版 */
 .morph-table,
 .prose-yoryon table {
   width: 100%;
@@ -850,9 +940,17 @@ pre.morph-code code,
   border-left-style: none;
   border-right-style: none;
   margin-top: 0px;
-  margin-bottom: 24px;
-  font-size: 15px;
-  line-height: 1.6;
+  margin-bottom: 20px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.morph-table :not(pre) > code,
+.prose-yoryon table :not(pre) > code {
+  font-size: 12px;
+  padding: 1px 4px;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .morph-table thead,
@@ -875,7 +973,7 @@ pre.morph-code code,
 .prose-yoryon th {
   text-align: left;
   font-weight: 600;
-  padding: 10px 12px;
+  padding: 8px 6px;
   border-top: 0px solid transparent;
   border-left: 0px solid transparent;
   border-right: 0px solid transparent;
@@ -892,7 +990,7 @@ pre.morph-code code,
 .morph-table td,
 .prose-yoryon td {
   text-align: left;
-  padding: 10px 12px;
+  padding: 8px 6px;
   border-top: 0px solid transparent;
   border-left: 0px solid transparent;
   border-right: 0px solid transparent;
@@ -919,13 +1017,13 @@ hr,
   border: none;
   border-top: 1px solid var(--yoryon-border);
   margin-top: 0px;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 figure,
 .prose-yoryon figure {
   margin-top: 0px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .morph-img,
@@ -937,7 +1035,7 @@ figure,
   border: none;
   display: block;
   margin-top: 0px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .morph-p > .morph-img,
@@ -996,9 +1094,9 @@ export const THEME_PRESETS: Readonly<Record<ThemePresetId, ThemePresetDefinition
       '--morph-font-sans': ANTHROPIC_SANS_STACK,
       '--morph-font-serif': ANTHROPIC_SERIF_STACK,
       '--morph-font-mono': ANTHROPIC_MONO_STACK,
-      '--morph-body-size': '16px',
-      '--morph-line-height': '1.8',
-      '--morph-block-gap': '20px',
+      '--morph-body-size': '15px',
+      '--morph-line-height': '1.75',
+      '--morph-block-gap': '16px',
     },
     presetCss: BASE_THEME_ACCENT_CSS,
   },
@@ -1017,9 +1115,9 @@ export const THEME_PRESETS: Readonly<Record<ThemePresetId, ThemePresetDefinition
       '--morph-font-sans': ANTHROPIC_SANS_STACK,
       '--morph-font-serif': ANTHROPIC_SERIF_STACK,
       '--morph-font-mono': ANTHROPIC_MONO_STACK,
-      '--morph-body-size': '16px',
-      '--morph-line-height': '1.8',
-      '--morph-block-gap': '20px',
+      '--morph-body-size': '15px',
+      '--morph-line-height': '1.75',
+      '--morph-block-gap': '16px',
     },
     presetCss: BASE_THEME_ACCENT_CSS,
   },
@@ -1038,9 +1136,9 @@ export const THEME_PRESETS: Readonly<Record<ThemePresetId, ThemePresetDefinition
       '--morph-font-sans': ANTHROPIC_SANS_STACK,
       '--morph-font-serif': ANTHROPIC_SERIF_STACK,
       '--morph-font-mono': ANTHROPIC_MONO_STACK,
-      '--morph-body-size': '16px',
-      '--morph-line-height': '1.8',
-      '--morph-block-gap': '20px',
+      '--morph-body-size': '15px',
+      '--morph-line-height': '1.75',
+      '--morph-block-gap': '16px',
     },
     presetCss: BASE_THEME_ACCENT_CSS,
   },
@@ -1059,9 +1157,9 @@ export const THEME_PRESETS: Readonly<Record<ThemePresetId, ThemePresetDefinition
       '--morph-font-sans': ANTHROPIC_SANS_STACK,
       '--morph-font-serif': ANTHROPIC_SERIF_STACK,
       '--morph-font-mono': ANTHROPIC_MONO_STACK,
-      '--morph-body-size': '16px',
-      '--morph-line-height': '1.8',
-      '--morph-block-gap': '20px',
+      '--morph-body-size': '15px',
+      '--morph-line-height': '1.75',
+      '--morph-block-gap': '16px',
     },
     presetCss: BASE_THEME_ACCENT_CSS,
   },

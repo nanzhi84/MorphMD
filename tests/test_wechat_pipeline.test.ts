@@ -845,4 +845,570 @@ describe('TestWeChatPipeline', () => {
       assetStore.clear();
     }
   });
+
+  // =========================================================================
+  // 维度 8：外链转文本降级、Callout <section> 保真与兜底样式、375px 手机端代码块防折行与字号/表格密度
+  // =========================================================================
+  it('test_wechat_external_link_degradation_callout_section_fidelity_and_375px_mobile_code_and_table_layout', async () => {
+    const assetStore = new AssetStore();
+    const coverRecord = await assetStore.ingest(png(1, 360, 160), { fileName: 'cover-mobile.png' });
+    const markdown = buildDefaultShowcaseMarkdown(coverRecord.uri);
+
+    try {
+      const anthropicSnap = await buildDeliverySnapshot(markdown, 'wechat', assetStore, {
+        customCss: THEME_PRESETS.default.presetCss,
+        tokens: THEME_PRESETS.default.tokens,
+      });
+
+      const yoryonPreset = DEFAULT_SAVED_CSS_PRESETS.find((p) => p.id === 'yoryon')!;
+      const yoryonSnap = await buildDeliverySnapshot(markdown, 'wechat', assetStore, {
+        customCss: yoryonPreset.css,
+        tokens: THEME_PRESETS.default.tokens,
+      });
+
+      const emptyCssSnap = await buildDeliverySnapshot(markdown, 'wechat', assetStore, {
+        customCss: '',
+        tokens: THEME_PRESETS.default.tokens,
+      });
+
+      const xArticleSnap = await buildDeliverySnapshot(markdown, 'x-article', assetStore, {
+        customCss: THEME_PRESETS.default.presetCss,
+        tokens: THEME_PRESETS.default.tokens,
+      });
+
+      const cardsSnap = await buildDeliverySnapshot(markdown, 'cards', assetStore, {
+        customCss: THEME_PRESETS.default.presetCss,
+        tokens: THEME_PRESETS.default.tokens,
+      });
+
+      // 1. Official verifier passes on Anthropic, Yoryon, and empty-CSS WeChat snapshots
+      expect(await verifier.verifyHtml(anthropicSnap.html)).toEqual({
+        isValid: true,
+        inValidInfo: {},
+      });
+      expect(await verifier.verifyHtml(yoryonSnap.html)).toEqual({
+        isValid: true,
+        inValidInfo: {},
+      });
+      expect(await verifier.verifyHtml(emptyCssSnap.html)).toEqual({
+        isValid: true,
+        inValidInfo: {},
+      });
+
+      // 2. External link diagnostic emitted in WeChat, while x-article and cards keep <a href="https://morphmd.dev">
+      expect(
+        anthropicSnap.diagnostics.some(
+          (d) => d.code === 'structure/wechat-external-link-degraded' && d.severity === 'info'
+        )
+      ).toBe(true);
+      expect(xArticleSnap.html).toContain('href="https://morphmd.dev"');
+      expect(cardsSnap.html).toContain('href="https://morphmd.dev"');
+
+      // 3. Even with empty customCss (""), Callout and Quote in WeChat retain baseline styles and native <p> with inline <span>+<br> (zero block descendants)
+      const emptyCalloutCheck = await page.evaluate((html) => {
+        const container = document.createElement('div');
+        container.innerHTML = html;
+        const callout = container.querySelector('.morph-callout') as HTMLElement | null;
+        const title = container.querySelector('.morph-callout-title') as HTMLElement | null;
+        const titleText = title?.querySelector('.morph-callout-title-text') as HTMLElement | null;
+        const body = container.querySelector('.morph-callout-body') as HTMLElement | null;
+        const quote = container.querySelector('.morph-quote') as HTMLElement | null;
+        return {
+          calloutTag: callout?.tagName || '',
+          containsTitleAndBody:
+            Boolean(callout && title && body && callout.contains(title) && callout.contains(body)),
+          blockDescendantCount: callout?.querySelectorAll('p, div, section').length ?? -1,
+          hasDirectBr: callout?.querySelector(':scope > br') !== null,
+          calloutBg: callout?.style.backgroundColor || '',
+          calloutBorderLeft: callout?.style.borderLeft || callout?.style.borderLeftWidth || '',
+          calloutRadius: callout?.style.borderRadius || '',
+          calloutPadding: callout?.style.padding || callout?.style.paddingTop || '',
+          calloutMarginTop: callout?.style.marginTop || '',
+          calloutMarginBottom: callout?.style.marginBottom || '',
+          calloutFontSize: callout?.style.fontSize || '',
+          calloutLineHeight: callout?.style.lineHeight || '',
+          calloutFontFamily: callout?.style.fontFamily || '',
+          calloutColor: callout?.style.color || '',
+          titleTag: title?.tagName || '',
+          titleTextWeight: titleText?.style.fontWeight || '',
+          bodyTag: body?.tagName || '',
+          quoteTag: quote?.tagName || '',
+          quoteBlockDescendantCount:
+            quote?.querySelectorAll('p, div, section, blockquote').length ?? -1,
+          hasLegacyBlockquote: container.querySelector('blockquote.morph-quote') !== null,
+        };
+      }, emptyCssSnap.html);
+
+      expect(emptyCalloutCheck.calloutTag).toBe('P');
+      expect(emptyCalloutCheck.containsTitleAndBody).toBe(true);
+      expect(emptyCalloutCheck.blockDescendantCount).toBe(0);
+      expect(emptyCalloutCheck.hasDirectBr).toBe(true);
+      expect(emptyCalloutCheck.calloutBg).toBeTruthy();
+      expect(emptyCalloutCheck.calloutBorderLeft).toContain('3px');
+      expect(emptyCalloutCheck.calloutRadius).toBe('0px 8px 8px 0px');
+      expect(emptyCalloutCheck.calloutPadding).toBeTruthy();
+      expect(emptyCalloutCheck.calloutMarginTop).toBe('0px');
+      expect(emptyCalloutCheck.calloutMarginBottom).toBe('16px');
+      expect(emptyCalloutCheck.calloutFontSize).toBe('14.5px');
+      expect(emptyCalloutCheck.calloutLineHeight).toBe('1.65');
+      expect(emptyCalloutCheck.calloutFontFamily).toBeTruthy();
+      expect(emptyCalloutCheck.calloutColor).toBeTruthy();
+      expect(emptyCalloutCheck.titleTag).toBe('SPAN');
+      expect(emptyCalloutCheck.titleTextWeight).toBe('600');
+      expect(emptyCalloutCheck.bodyTag).toBe('SPAN');
+      expect(emptyCalloutCheck.quoteTag).toBe('P');
+      expect(emptyCalloutCheck.quoteBlockDescendantCount).toBe(0);
+      expect(emptyCalloutCheck.hasLegacyBlockquote).toBe(false);
+
+      // 4. Verify 375px mobile WeChat viewport rendering & 585px Preview-vs-WeChat-Host 1:1 Isomorphism for both Anthropic and Yoryon presets
+      for (const [presetId, snap] of [
+        ['default', anthropicSnap],
+        ['yoryon', yoryonSnap],
+      ] as const) {
+        const mobileAudit = await page.evaluate((html) => {
+          document.body.innerHTML = `
+            <style>
+              body { margin: 0; padding: 0; }
+              #wechat-mobile-box {
+                width: 375px;
+                padding: 0 16px;
+                box-sizing: border-box;
+                text-align: justify;
+              }
+              #wechat-mobile-box pre {
+                white-space: pre-wrap;
+                word-wrap: break-word;
+              }
+              #wechat-mobile-box ol,
+              #wechat-mobile-box ul,
+              #wechat-mobile-box blockquote {
+                margin-bottom: 0px;
+              }
+            </style>
+            <div id="wechat-mobile-box" class="rich_media_content">${html}</div>
+          `;
+
+          const root = document.getElementById('wechat-mobile-box')!;
+          const docEl = root.querySelector('.morph-doc') as HTMLElement;
+          const h1 = root.querySelector('h1.morph-h1') as HTMLElement;
+          const h2s = Array.from(root.querySelectorAll('h2.morph-h2')) as HTMLElement[];
+          const h2 = h2s[0];
+          const h2Second = h2s[1];
+          const h3 = root.querySelector('h3.morph-h3') as HTMLElement;
+          const bodyPara = root.querySelector('p.morph-p') as HTMLElement;
+          const ol = root.querySelector('ol.morph-list') as HTMLElement;
+          const liSections = Array.from(ol.querySelectorAll(':scope > li > section')) as HTMLElement[];
+          const strong = root.querySelector('p strong') as HTMLElement;
+          const em = root.querySelector('p em') as HTMLElement;
+          const externalAnchors = root.querySelectorAll('a[href^="http"]');
+          const linkText = root.querySelector('.morph-link-text') as HTMLElement | null;
+
+          const quote = root.querySelector('.morph-quote') as HTMLElement;
+          const quotePara = quote?.querySelector('.morph-p') as HTMLElement | null;
+          const legacyBlockquoteCount = root.querySelectorAll('blockquote.morph-quote').length;
+
+          const callout = root.querySelector('.morph-callout') as HTMLElement;
+          const calloutTitle = callout.querySelector('.morph-callout-title') as HTMLElement;
+          const calloutTitleText = calloutTitle.querySelector(
+            '.morph-callout-title-text'
+          ) as HTMLElement | null;
+          const calloutBody = callout.querySelector('.morph-callout-body') as HTMLElement;
+          const calloutPara = calloutBody.querySelector('.morph-p') as HTMLElement;
+          const calloutPrevEl = callout.previousElementSibling as HTMLElement;
+          const calloutNextEl = callout.nextElementSibling as HTMLElement;
+
+          const blockContainers = Array.from(
+            root.querySelectorAll(
+              '.morph-doc, .morph-callout, .morph-quote, ul.morph-list, ol.morph-list'
+            )
+          );
+          let interBlockWhitespaceTextNodeCount = 0;
+          for (const containerEl of blockContainers) {
+            for (const child of Array.from(containerEl.childNodes)) {
+              if (
+                child.nodeType === Node.TEXT_NODE &&
+                (child.textContent || '').trim() === '' &&
+                (child.textContent || '').length > 0
+              ) {
+                interBlockWhitespaceTextNodeCount++;
+              }
+            }
+          }
+
+          const pre = root.querySelector('pre.morph-code') as HTMLElement;
+          const preCode = pre.querySelector('code') as HTMLElement;
+          const codeLines = Array.from(pre.querySelectorAll('.line')) as HTMLElement[];
+
+          const table = root.querySelector('table.morph-table') as HTMLElement;
+          const th = table.querySelector('th') as HTMLElement;
+          const td = table.querySelector('td') as HTMLElement;
+          const tableCode = table.querySelector('code') as HTMLElement;
+
+          const preCS = window.getComputedStyle(pre);
+          const preCodeCS = window.getComputedStyle(preCode);
+
+          const h2FirstPrev = h2.previousElementSibling as HTMLElement;
+          const h2FirstNext = h2.nextElementSibling as HTMLElement;
+          const h2SecondPrev = h2Second.previousElementSibling as HTMLElement;
+          const h3Next = h3.nextElementSibling as HTMLElement;
+
+          return {
+            docFontSize: docEl.style.fontSize,
+            docLineHeight: docEl.style.lineHeight,
+            paraFontSize: bodyPara.style.fontSize,
+            paraLineHeight: bodyPara.style.lineHeight,
+            olMarginTop: ol.style.marginTop,
+            olMarginBottom: ol.style.marginBottom,
+            liSectionFontSizes: liSections.map((s) => s.style.fontSize),
+            liSectionMargins: liSections.map((s) => s.style.marginBottom),
+            h1FontSize: h1.style.fontSize,
+            h1LineHeight: h1.style.lineHeight,
+            h1MarginTop: h1.style.marginTop,
+            h1MarginBottom: h1.style.marginBottom,
+            h2FontSize: h2.style.fontSize,
+            h2LineHeight: h2.style.lineHeight,
+            h2MarginTop: h2.style.marginTop,
+            h2MarginBottom: h2.style.marginBottom,
+            h3FontSize: h3.style.fontSize,
+            h3LineHeight: h3.style.lineHeight,
+            h3MarginTop: h3.style.marginTop,
+            h3MarginBottom: h3.style.marginBottom,
+            gapAboveFirstH2:
+              h2.getBoundingClientRect().top - h2FirstPrev.getBoundingClientRect().bottom,
+            gapBelowFirstH2:
+              h2FirstNext.getBoundingClientRect().top - h2.getBoundingClientRect().bottom,
+            gapAboveSecondH2:
+              h2Second.getBoundingClientRect().top - h2SecondPrev.getBoundingClientRect().bottom,
+            gapH2ToH3:
+              h3.getBoundingClientRect().top - h2Second.getBoundingClientRect().bottom,
+            gapBelowH3:
+              h3Next.getBoundingClientRect().top - h3.getBoundingClientRect().bottom,
+            strongWeight: strong.style.fontWeight,
+            strongColor: strong.style.color.toLowerCase(),
+            emStyle: em.style.fontStyle,
+            emColor: em.style.color.toLowerCase(),
+            externalAnchorCount: externalAnchors.length,
+            linkTextHref: linkText?.getAttribute('data-original-href') || '',
+            linkTextContent: linkText?.textContent || '',
+            legacyBlockquoteCount,
+            quoteTag: quote?.tagName || '',
+            quoteBlockDescendantCount:
+              quote?.querySelectorAll('p, div, section, blockquote').length ?? -1,
+            quoteBorderLeft: (quote?.style.borderLeft || quote?.style.borderLeftColor || '').toLowerCase(),
+            quoteBorderLeftWidth: quote?.style.borderLeftWidth || quote?.style.borderLeft || '',
+            quotePadding: quote?.style.padding || quote?.style.paddingLeft || '',
+            quoteMarginTop: quote?.style.marginTop || '',
+            quoteMarginBottom: quote?.style.marginBottom || '',
+            quoteParaTag: quotePara?.tagName || '',
+            quoteParaFontFamily: quotePara?.style.fontFamily || '',
+            quoteParaColor: (quotePara?.style.color || '').toLowerCase(),
+            quoteParaFontSize: quotePara?.style.fontSize || '',
+            quoteParaLineHeight: quotePara?.style.lineHeight || '',
+            quoteParaFontStyle: quotePara?.style.fontStyle || '',
+            calloutTag: callout.tagName,
+            calloutBlockDescendantCount: callout.querySelectorAll('p, div, section').length,
+            calloutHasDirectBr: callout.querySelector(':scope > br') !== null,
+            calloutMarginTop: callout.style.marginTop,
+            calloutMarginBottom: callout.style.marginBottom,
+            calloutPrevSiblingNodeType: callout.previousSibling?.nodeType ?? 0,
+            calloutNextSiblingNodeType: callout.nextSibling?.nodeType ?? 0,
+            interBlockWhitespaceTextNodeCount,
+            gapAboveCallout:
+              callout.getBoundingClientRect().top - calloutPrevEl.getBoundingClientRect().bottom,
+            gapBelowCallout:
+              calloutNextEl.getBoundingClientRect().top - callout.getBoundingClientRect().bottom,
+            calloutRadius: callout.style.borderRadius,
+            calloutFontSize: callout.style.fontSize,
+            calloutLineHeight: callout.style.lineHeight,
+            calloutTitleTag: calloutTitle.tagName,
+            calloutTitleTextWeight: calloutTitleText?.style.fontWeight || '',
+            calloutBodyTag: calloutBody.tagName,
+            calloutParaTag: calloutPara?.tagName || '',
+            calloutParaFontSize: calloutPara?.style.fontSize || '',
+            calloutParaLineHeight: calloutPara?.style.lineHeight || '',
+            preFontSize: pre.style.fontSize,
+            preWhiteSpace: preCS.whiteSpace,
+            preTextAlign: preCS.textAlign,
+            preWordBreak: preCS.wordBreak,
+            preOverflowWrap: preCS.overflowWrap,
+            preCodeWhiteSpace: preCodeCS.whiteSpace,
+            preCodeTextAlign: preCodeCS.textAlign,
+            lineStyles: codeLines.map((line) => {
+              const cs = window.getComputedStyle(line);
+              return {
+                text: (line.textContent || '').trim(),
+                whiteSpace: cs.whiteSpace,
+                textAlign: cs.textAlign,
+                wordBreak: cs.wordBreak,
+                overflowWrap: cs.overflowWrap,
+                height: line.getBoundingClientRect().height,
+              };
+            }),
+            tableFontSize: table.style.fontSize,
+            thPadding: th.style.padding,
+            tdPadding: td.style.padding,
+            tableCodeFontSize: tableCode.style.fontSize,
+            tableCodeWhiteSpace: tableCode.style.whiteSpace,
+          };
+        }, snap.html);
+
+        expect(mobileAudit.docFontSize).toBe('15px');
+        expect(mobileAudit.docLineHeight).toBe('1.75');
+        expect(mobileAudit.paraFontSize).toBe('15px');
+        expect(mobileAudit.paraLineHeight).toBe('1.75');
+        expect(mobileAudit.olMarginTop).toBe('0px');
+        expect(mobileAudit.olMarginBottom).toBe('0px');
+        expect(mobileAudit.liSectionFontSizes).toEqual(['15px', '15px', '15px']);
+        expect(mobileAudit.liSectionMargins).toEqual(['6px', '6px', '16px']);
+
+        expect(mobileAudit.h1FontSize).toBe('24px');
+        expect(mobileAudit.h1LineHeight).toBe('1.35');
+        expect(mobileAudit.h1MarginTop).toBe('0px');
+        expect(mobileAudit.h1MarginBottom).toBe('22px');
+        expect(mobileAudit.h2FontSize).toBe('20px');
+        expect(mobileAudit.h2LineHeight).toBe('1.4');
+        expect(mobileAudit.h2MarginTop).toBe('28px');
+        expect(mobileAudit.h2MarginBottom).toBe('16px');
+        expect(mobileAudit.h3FontSize).toBe('17px');
+        expect(mobileAudit.h3LineHeight).toBe('1.45');
+        expect(mobileAudit.h3MarginTop).toBe('22px');
+        expect(mobileAudit.h3MarginBottom).toBe('12px');
+
+        // Heading vertical rhythm under hostile WeChat host CSS (ol/ul/blockquote margin-bottom: 0)
+        expect(mobileAudit.gapAboveFirstH2).toBeGreaterThanOrEqual(26);
+        expect(mobileAudit.gapBelowFirstH2).toBeGreaterThanOrEqual(15);
+        expect(mobileAudit.gapAboveSecondH2).toBeGreaterThanOrEqual(26);
+        expect(mobileAudit.gapH2ToH3).toBeGreaterThanOrEqual(18);
+        expect(mobileAudit.gapBelowH3).toBeGreaterThanOrEqual(11);
+
+        expect(mobileAudit.strongWeight).toBe('600');
+        expect(mobileAudit.emStyle).toBe('italic');
+        if (presetId === 'default') {
+          expect(mobileAudit.strongColor).toMatch(/#141413|rgb\(20,\s*20,\s*19\)/);
+          expect(mobileAudit.emColor).toMatch(/#8c5a4b|rgb\(140,\s*90,\s*75\)/);
+        } else {
+          expect(mobileAudit.strongColor).toMatch(/#282828|rgb\(40,\s*40,\s*40\)/);
+          expect(mobileAudit.emColor).toMatch(/#607383|rgb\(96,\s*115,\s*131\)/);
+        }
+
+        expect(mobileAudit.externalAnchorCount).toBe(0);
+        expect(mobileAudit.linkTextHref).toBe('https://morphmd.dev');
+        expect(mobileAudit.linkTextContent).toBe('MorphMD 跨端排版系统 (https://morphmd.dev)');
+
+        // Quote native <p class="morph-quote"> with inline <span class="morph-p"> (eliminates .js_blockquote_wrap double left-border shadow)
+        expect(mobileAudit.legacyBlockquoteCount).toBe(0);
+        expect(mobileAudit.quoteTag).toBe('P');
+        expect(mobileAudit.quoteBlockDescendantCount).toBe(0);
+        expect(mobileAudit.quoteBorderLeftWidth).toContain('2px');
+        expect(mobileAudit.quotePadding).toBeTruthy();
+        expect(mobileAudit.quoteMarginTop).toBe('0px');
+        expect(mobileAudit.quoteMarginBottom).toBe('20px');
+        expect(mobileAudit.quoteParaTag).toBe('SPAN');
+        expect(mobileAudit.quoteParaFontSize).toBe('15px');
+        expect(mobileAudit.quoteParaLineHeight).toBe('1.7');
+        expect(mobileAudit.quoteParaFontStyle).toBe('normal');
+        if (presetId === 'default') {
+          expect(mobileAudit.quoteBorderLeft).toMatch(/#c86446|rgb\(200,\s*100,\s*70\)/);
+          expect(mobileAudit.quoteParaFontFamily).toContain('Newsreader');
+          expect(mobileAudit.quoteParaFontFamily).toContain('Noto Serif SC');
+          expect(mobileAudit.quoteParaColor).toMatch(/#3d3c3a|rgb\(61,\s*60,\s*58\)/);
+        } else {
+          expect(mobileAudit.quoteBorderLeft).toMatch(/#47758f|rgb\(71,\s*117,\s*143\)/);
+          expect(mobileAudit.quoteParaFontFamily).toMatch(/Iowan Old Style|Palatino|Songti SC/i);
+          expect(mobileAudit.quoteParaColor).toMatch(/#253947|rgb\(37,\s*57,\s*71\)/);
+        }
+
+        expect(mobileAudit.calloutTag).toBe('P');
+        expect(mobileAudit.calloutBlockDescendantCount).toBe(0);
+        expect(mobileAudit.calloutHasDirectBr).toBe(true);
+        expect(mobileAudit.calloutMarginTop).toBe('0px');
+        expect(mobileAudit.calloutMarginBottom).toBe('16px');
+        expect(mobileAudit.calloutPrevSiblingNodeType).toBe(1);
+        expect(mobileAudit.calloutNextSiblingNodeType).toBe(1);
+        expect(mobileAudit.interBlockWhitespaceTextNodeCount).toBe(0);
+        expect(mobileAudit.gapAboveCallout).toBeGreaterThanOrEqual(14);
+        expect(mobileAudit.gapAboveCallout).toBeLessThanOrEqual(20);
+        expect(mobileAudit.gapBelowCallout).toBeGreaterThanOrEqual(14);
+        expect(mobileAudit.gapBelowCallout).toBeLessThanOrEqual(20);
+        expect(mobileAudit.calloutRadius).toBe('0px 8px 8px 0px');
+        expect(mobileAudit.calloutFontSize).toBe('14.5px');
+        expect(mobileAudit.calloutLineHeight).toBe('1.65');
+        expect(mobileAudit.calloutTitleTag).toBe('SPAN');
+        expect(mobileAudit.calloutTitleTextWeight).toBe('600');
+        expect(mobileAudit.calloutBodyTag).toBe('SPAN');
+        expect(mobileAudit.calloutParaTag).toBe('SPAN');
+        expect(mobileAudit.calloutParaFontSize).toBe('14.5px');
+        expect(mobileAudit.calloutParaLineHeight).toBe('1.65');
+
+        expect(mobileAudit.preFontSize).toBe('13px');
+        expect(mobileAudit.preWhiteSpace).toBe('pre');
+        expect(mobileAudit.preTextAlign).toBe('left');
+        expect(mobileAudit.preWordBreak).toBe('normal');
+        expect(mobileAudit.preOverflowWrap).toBe('normal');
+        expect(mobileAudit.preCodeWhiteSpace).toBe('pre');
+        expect(mobileAudit.preCodeTextAlign).toBe('left');
+        expect(mobileAudit.lineStyles).toHaveLength(5);
+        for (const line of mobileAudit.lineStyles) {
+          expect(line.text.length).toBeGreaterThan(0);
+          expect(line.whiteSpace).toBe('pre');
+          expect(line.textAlign).toBe('left');
+          expect(line.wordBreak).toBe('normal');
+          expect(line.overflowWrap).toBe('normal');
+          // Each code line must stay on a single line (no wrapping in 375px mobile container)
+          expect(line.height).toBeLessThanOrEqual(26);
+        }
+
+        expect(mobileAudit.tableFontSize).toBe('13px');
+        expect(mobileAudit.thPadding).toBe('8px 6px');
+        expect(mobileAudit.tdPadding).toBe('8px 6px');
+        expect(mobileAudit.tableCodeFontSize).toBe('12px');
+        expect(mobileAudit.tableCodeWhiteSpace).toBe('normal');
+
+        // 5. 1:1 Preview vs Simulated WeChat Host (.ProseMirror / .rich_media_content) Layout Isomorphism at 585px
+        const isomorphism = await page.evaluate((html) => {
+          document.body.innerHTML = `
+            <style>
+              body { margin: 0; padding: 0; }
+              .stage-row { display: flex; gap: 20px; align-items: flex-start; }
+              .box { width: 585px; box-sizing: border-box; }
+              #preview-box .morph-doc { display: flow-root; }
+              #wechat-host-box {
+                font-size: 17px;
+                line-height: 1.6;
+                color: rgba(0, 0, 0, 0.9);
+                text-align: justify;
+              }
+              #wechat-host-box .list-paddingleft-1 {
+                margin: 0;
+                padding-left: 22px;
+              }
+              #wechat-host-box pre {
+                white-space: pre-wrap;
+                word-wrap: break-word;
+              }
+            </style>
+            <div class="stage-row">
+              <div id="preview-box" class="box">${html}</div>
+              <div id="wechat-host-box" class="box"></div>
+            </div>
+          `;
+
+          const hostBox = document.getElementById('wechat-host-box')!;
+          const temp = document.createElement('div');
+          temp.innerHTML = html;
+          const morphDoc = temp.querySelector('.morph-doc');
+          if (morphDoc) {
+            while (morphDoc.firstChild) {
+              hostBox.appendChild(morphDoc.firstChild);
+            }
+          }
+
+          // Simulate WeChat ProseMirror stripping style from ol, ul, li, and pre > code
+          for (const listEl of Array.from(hostBox.querySelectorAll('ol, ul'))) {
+            listEl.removeAttribute('style');
+            listEl.classList.add('list-paddingleft-1');
+          }
+          for (const liEl of Array.from(hostBox.querySelectorAll('li'))) {
+            liEl.removeAttribute('style');
+          }
+          for (const codeEl of Array.from(hostBox.querySelectorAll('pre > code'))) {
+            codeEl.removeAttribute('style');
+          }
+
+          // Simulate WeChat ProseMirror inserting empty <p><br></p> around any top-level <section> card
+          let injectedEmptyParaCount = 0;
+          for (const sec of Array.from(hostBox.querySelectorAll(':scope > section'))) {
+            const beforeP = document.createElement('p');
+            beforeP.setAttribute('style', 'margin: 0 0 24px 0; line-height: 1.6;');
+            beforeP.innerHTML = '<br>';
+            const afterP = document.createElement('p');
+            afterP.setAttribute('style', 'margin: 0 0 24px 0; line-height: 1.6;');
+            afterP.innerHTML = '<br>';
+            sec.parentNode!.insertBefore(beforeP, sec);
+            sec.parentNode!.insertBefore(afterP, sec.nextSibling);
+            injectedEmptyParaCount += 2;
+          }
+
+          const measureBox = (boxId: string) => {
+            const root = document.getElementById(boxId)!;
+            const quote = root.querySelector('.morph-quote') as HTMLElement;
+            const callout = root.querySelector('.morph-callout') as HTMLElement;
+            const calloutPrev = callout.previousElementSibling as HTMLElement;
+            const calloutNext = callout.nextElementSibling as HTMLElement;
+            const h2s = Array.from(root.querySelectorAll('h2.morph-h2')) as HTMLElement[];
+            const ol = root.querySelector('ol.morph-list') as HTMLElement;
+            const liSecs = Array.from(ol.querySelectorAll(':scope > li > section')) as HTMLElement[];
+            const paras = Array.from(root.querySelectorAll('p.morph-p')) as HTMLElement[];
+
+            return {
+              quoteHeight: quote.getBoundingClientRect().height,
+              calloutHeight: callout.getBoundingClientRect().height,
+              gapAboveCallout:
+                callout.getBoundingClientRect().top - calloutPrev.getBoundingClientRect().bottom,
+              gapBelowCallout:
+                calloutNext.getBoundingClientRect().top - callout.getBoundingClientRect().bottom,
+              gapH2ToFirstLi:
+                liSecs[0].getBoundingClientRect().top - h2s[0].getBoundingClientRect().bottom,
+              gapLi1ToLi2:
+                liSecs[1].getBoundingClientRect().top - liSecs[0].getBoundingClientRect().bottom,
+              gapLi2ToLi3:
+                liSecs[2].getBoundingClientRect().top - liSecs[1].getBoundingClientRect().bottom,
+              gapLastLiToNextH2:
+                h2s[1].getBoundingClientRect().top - liSecs[2].getBoundingClientRect().bottom,
+              liSectionHeights: liSecs.map((s) => s.getBoundingClientRect().height),
+              paraHeights: paras.map((p) => p.getBoundingClientRect().height),
+            };
+          };
+
+          return {
+            injectedEmptyParaCount,
+            preview: measureBox('preview-box'),
+            host: measureBox('wechat-host-box'),
+          };
+        }, snap.html);
+
+        expect(isomorphism.injectedEmptyParaCount).toBe(0);
+        expect(
+          Math.abs(isomorphism.preview.quoteHeight - isomorphism.host.quoteHeight)
+        ).toBeLessThan(1);
+        expect(
+          Math.abs(isomorphism.preview.calloutHeight - isomorphism.host.calloutHeight)
+        ).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(isomorphism.preview.gapAboveCallout - isomorphism.host.gapAboveCallout)
+        ).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(isomorphism.preview.gapBelowCallout - isomorphism.host.gapBelowCallout)
+        ).toBeLessThanOrEqual(1);
+        expect(isomorphism.host.gapAboveCallout).toBeLessThanOrEqual(24);
+        expect(isomorphism.host.gapBelowCallout).toBeLessThanOrEqual(24);
+
+        expect(
+          Math.abs(isomorphism.preview.gapH2ToFirstLi - isomorphism.host.gapH2ToFirstLi)
+        ).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(isomorphism.preview.gapLi1ToLi2 - isomorphism.host.gapLi1ToLi2)
+        ).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(isomorphism.preview.gapLi2ToLi3 - isomorphism.host.gapLi2ToLi3)
+        ).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(isomorphism.preview.gapLastLiToNextH2 - isomorphism.host.gapLastLiToNextH2)
+        ).toBeLessThanOrEqual(1);
+
+        for (let i = 0; i < isomorphism.preview.liSectionHeights.length; i++) {
+          expect(
+            Math.abs(isomorphism.preview.liSectionHeights[i] - isomorphism.host.liSectionHeights[i])
+          ).toBeLessThanOrEqual(1);
+        }
+        for (let i = 0; i < isomorphism.preview.paraHeights.length; i++) {
+          expect(
+            Math.abs(isomorphism.preview.paraHeights[i] - isomorphism.host.paraHeights[i])
+          ).toBeLessThanOrEqual(1);
+        }
+      }
+    } finally {
+      assetStore.clear();
+    }
+  });
 });

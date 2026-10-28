@@ -190,7 +190,7 @@ export function transformMathAndCode(
 
         const langMatch = classList.find((c) => c.startsWith('language-'));
         const lang = langMatch ? langMatch.replace('language-', '') : '';
-        const rawCode = extractRawText(node);
+        const rawCode = extractRawText(node).replace(/\r?\n$/, '');
         const extraMediaChildren = node.children.filter(
           (c): c is Element => c.type === 'element' && c.tagName === 'img'
         );

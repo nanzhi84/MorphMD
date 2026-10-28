@@ -436,7 +436,7 @@ describe('TestTargetSwitchingAndCardsReflow', () => {
 });
 
 describe('TestEditorInputToolbarAndAssetPaste', () => {
-  it('test_editing_markdown_input_and_clicking_toolbar_actions_update_preview_and_footer_stats', async () => {
+  it('test_editing_markdown_input_updates_preview_footer_stats_without_format_toolbar_buttons', async () => {
     const { container } = await mountWorkbench({
       initialMarkdown: '# 初始标题',
     });
@@ -457,14 +457,17 @@ describe('TestEditorInputToolbarAndAssetPaste', () => {
     const footer = getByTestId(container, 'editor-footer');
     expect(footer.textContent).toBeTruthy();
 
-    await clickTestId(container, 'toolbar-insert-table');
-    const markdownInput = getByTestId<HTMLTextAreaElement>(container, 'markdown-input');
-    expect(markdownInput.value).toContain('|');
-    expect(previewStage.querySelector('table')).not.toBeNull();
-
-    await clickTestId(container, 'toolbar-insert-code');
-    expect(markdownInput.value).toContain('```');
-    expect(previewStage.querySelector('pre, code')).not.toBeNull();
+    expect(container.querySelector('.morph-format-toolbar')).toBeNull();
+    for (const testId of [
+      'toolbar-insert-image',
+      'toolbar-insert-link',
+      'toolbar-insert-table',
+      'toolbar-insert-ul',
+      'toolbar-insert-ol',
+      'toolbar-insert-code',
+    ]) {
+      expect(container.querySelector(`[data-testid="${testId}"]`)).toBeNull();
+    }
   });
 
   it('test_undo_and_redo_buttons_revert_and_restore_committed_document_states', async () => {
@@ -567,7 +570,7 @@ describe('TestStyleDrawerCustomization', () => {
       '',
       '#### 四级无衬线小标题',
       '',
-      '正文包含 *强调文本*、`inline_token` 与 [Anthropic Research](https://anthropic.com)。',
+      '正文包含 **核心加粗重点**、*强调文本*、`inline_token` 与 [Anthropic Research](https://anthropic.com)。',
       '',
       '> 学术与社论风正体衬线引文，左侧赤陶色竖线装饰。',
       '',
@@ -580,7 +583,7 @@ describe('TestStyleDrawerCustomization', () => {
       '',
       '| 评估维度 | 基准得分 |',
       '| :--- | :--- |',
-      '| 排版还原度 | 99.8% |',
+      '| 排版还原度 | `99.8%` |',
       '',
       '---',
       '',
@@ -603,12 +606,12 @@ describe('TestStyleDrawerCustomization', () => {
       docEl!.style.backgroundColor.toLowerCase()
     );
     expect(docEl!.style.color.toLowerCase()).toMatch(/#1f1e1d|rgb\(31,\s*30,\s*29\)/);
-    expect(docEl!.style.fontSize).toBe('16px');
-    expect(docEl!.style.lineHeight).toBe('1.8');
+    expect(docEl!.style.fontSize).toBe('15px');
+    expect(docEl!.style.lineHeight).toBe('1.75');
     expect(docEl!.style.letterSpacing).toBe('0.01em');
     expect(docEl!.style.fontFamily.replace(/^["']|["']$/g, '')).toMatch(/^Inter\b/);
 
-    // 2. Chinese & English Typography Hierarchy (h1, h2, h3, em, blockquote)
+    // 2. Chinese & English Typography Hierarchy (h1, h2, h3, strong, em, blockquote)
     const h1 = previewStage.querySelector<HTMLElement>('h1.morph-h1');
     const h2 = previewStage.querySelector<HTMLElement>('h2.morph-h2');
     const h3 = previewStage.querySelector<HTMLElement>('h3.morph-h3');
@@ -619,43 +622,60 @@ describe('TestStyleDrawerCustomization', () => {
     expect(h1!.style.fontFamily).toContain('Newsreader');
     expect(h1!.style.fontFamily).toContain('Noto Serif SC');
     expect(h1!.style.fontFamily.replace(/^["']|["']$/g, '')).toMatch(/^Newsreader\b/);
-    expect(h1!.style.fontSize).toBe('36px');
-    expect(h1!.style.lineHeight).toBe('1.3');
+    expect(h1!.style.fontSize).toBe('24px');
+    expect(h1!.style.lineHeight).toBe('1.35');
     expect(h1!.style.fontWeight).toBe('500');
     expect(h1!.style.letterSpacing).toBe('-0.01em');
+    expect(h1!.style.marginTop).toBe('0px');
+    expect(h1!.style.marginBottom).toBe('22px');
     expect(h1!.style.color.toLowerCase()).toMatch(/#141413|rgb\(20,\s*20,\s*19\)/);
 
     expect(h2!.style.fontFamily).toContain('Newsreader');
     expect(h2!.style.fontFamily).toContain('Noto Serif SC');
-    expect(h2!.style.fontSize).toBe('24px');
+    expect(h2!.style.fontSize).toBe('20px');
     expect(h2!.style.lineHeight).toBe('1.4');
     expect(h2!.style.fontWeight).toBe('500');
     expect(h2!.style.letterSpacing).toBe('-0.01em');
+    expect(h2!.style.marginTop).toBe('28px');
+    expect(h2!.style.marginBottom).toBe('16px');
 
     expect(h3!.style.fontFamily).toContain('Inter');
-    expect(h3!.style.fontSize).toBe('18px');
-    expect(h3!.style.lineHeight).toBe('1.5');
+    expect(h3!.style.fontSize).toBe('17px');
+    expect(h3!.style.lineHeight).toBe('1.45');
     expect(h3!.style.fontWeight).toBe('600');
+    expect(h3!.style.marginTop).toBe('22px');
+    expect(h3!.style.marginBottom).toBe('12px');
+
+    const bodyPara = previewStage.querySelector<HTMLElement>('p.morph-p');
+    expect(bodyPara).not.toBeNull();
+    expect(bodyPara!.style.fontSize).toBe('15px');
+    expect(bodyPara!.style.lineHeight).toBe('1.75');
+    expect(bodyPara!.style.fontFamily).toContain('Inter');
+    expect(bodyPara!.style.color.toLowerCase()).toMatch(/#1f1e1d|rgb\(31,\s*30,\s*29\)/);
+
+    const strong = previewStage.querySelector<HTMLElement>('p strong');
+    expect(strong).not.toBeNull();
+    expect(strong!.style.fontWeight).toBe('600');
+    expect(strong!.style.color.toLowerCase()).toMatch(/#141413|rgb\(20,\s*20,\s*19\)/);
 
     const em = previewStage.querySelector<HTMLElement>('p em');
     expect(em).not.toBeNull();
-    expect(em!.style.fontStyle).toBe('normal');
-    expect(em!.style.fontFamily).toContain('Newsreader');
-    expect(em!.style.fontFamily).toContain('Noto Serif SC');
+    expect(em!.style.fontStyle).toBe('italic');
     expect(['', 'none']).toContain(em!.style.borderBottom || em!.style.borderBottomStyle || '');
-    expect(em!.style.color.toLowerCase()).toMatch(/#c86446|rgb\(200,\s*100,\s*70\)/);
+    expect(em!.style.color.toLowerCase()).toMatch(/#8c5a4b|rgb\(140,\s*90,\s*75\)/);
 
-    const link = previewStage.querySelector<HTMLElement>('p a');
-    expect(link).not.toBeNull();
-    expect(link!.style.textDecoration).toBe('none');
-    expect((link!.style.borderBottom || link!.style.borderBottomColor).toLowerCase()).toMatch(
-      /#c86446|rgb\(200,\s*100,\s*70\)/
-    );
-    expect(link!.style.borderBottomWidth || link!.style.borderBottom).toContain('1px');
-    expect(link!.style.borderBottomStyle || link!.style.borderBottom).toContain('solid');
+    expect(previewStage.querySelector('p a')).toBeNull();
+    const linkText = previewStage.querySelector<HTMLElement>('p .morph-link-text');
+    expect(linkText).not.toBeNull();
+    expect(linkText!.getAttribute('data-original-href')).toBe('https://anthropic.com');
+    expect(linkText!.textContent).toBe('Anthropic Research (https://anthropic.com)');
+    expect(linkText!.style.color.toLowerCase()).toMatch(/#c86446|rgb\(200,\s*100,\s*70\)/);
 
-    const quote = previewStage.querySelector<HTMLElement>('blockquote.morph-quote');
+    const quote = previewStage.querySelector<HTMLElement>('.morph-quote');
     expect(quote).not.toBeNull();
+    expect(quote!.tagName).toBe('P');
+    expect(previewStage.querySelector('blockquote.morph-quote')).toBeNull();
+    expect(quote!.querySelectorAll('p, div, section, blockquote')).toHaveLength(0);
     expect(quote!.style.fontStyle).toBe('normal');
     expect(quote!.style.fontFamily).toContain('Newsreader');
     expect(quote!.style.fontFamily).toContain('Noto Serif SC');
@@ -664,11 +684,22 @@ describe('TestStyleDrawerCustomization', () => {
     );
     expect(quote!.style.borderLeftWidth || quote!.style.borderLeft).toContain('2px');
     expect(quote!.style.color.toLowerCase()).toMatch(/#3d3c3a|rgb\(61,\s*60,\s*58\)/);
+    expect(quote!.style.marginTop).toBe('0px');
+    expect(quote!.style.marginBottom).toBe('20px');
     expect(quote!.style.marginLeft).toBe('0px');
     expect(quote!.style.marginRight).toBe('0px');
 
+    const quotePara = quote!.querySelector<HTMLElement>('.morph-p');
+    expect(quotePara).not.toBeNull();
+    expect(quotePara!.tagName).toBe('SPAN');
+    expect(quotePara!.style.fontFamily).toContain('Newsreader');
+    expect(quotePara!.style.fontFamily).toContain('Noto Serif SC');
+    expect(quotePara!.style.fontSize).toBe('15px');
+    expect(quotePara!.style.lineHeight).toBe('1.7');
+    expect(quotePara!.style.color.toLowerCase()).toMatch(/#3d3c3a|rgb\(61,\s*60,\s*58\)/);
+
     // 3. Inline code, Code block, and Callout
-    const inlineCode = previewStage.querySelector<HTMLElement>(':not(pre) > code');
+    const inlineCode = previewStage.querySelector<HTMLElement>('p > code');
     const codeBlock = previewStage.querySelector<HTMLElement>('pre.morph-code');
     expect(inlineCode).not.toBeNull();
     expect(codeBlock).not.toBeNull();
@@ -684,17 +715,49 @@ describe('TestStyleDrawerCustomization', () => {
     expect(codeBlock!.style.backgroundColor.toLowerCase()).toMatch(
       /#f2efe9|rgb\(242,\s*239,\s*233\)/
     );
+    expect(codeBlock!.style.whiteSpace).toBe('pre');
+    expect(codeBlock!.style.textAlign).toBe('left');
+    expect(codeBlock!.style.wordBreak).toBe('normal');
+    expect(codeBlock!.style.overflowWrap).toBe('normal');
+    expect(codeBlock!.style.fontSize).toBe('13px');
 
     const callout = previewStage.querySelector<HTMLElement>('.morph-callout');
     expect(callout).not.toBeNull();
+    expect(callout!.tagName).toBe('P');
+    expect(callout!.querySelectorAll('p, div, section')).toHaveLength(0);
+    expect(callout!.querySelector(':scope > br')).not.toBeNull();
+    expect(callout!.style.marginTop).toBe('0px');
+    expect(callout!.style.marginBottom).toBe('16px');
+    expect(callout!.previousSibling?.nodeType).toBe(window.Node.ELEMENT_NODE);
+    expect(callout!.nextSibling?.nodeType).toBe(window.Node.ELEMENT_NODE);
     expect(callout!.style.backgroundColor.toLowerCase()).toMatch(
       /#f2efe9|rgb\(242,\s*239,\s*233\)/
     );
+    expect(callout!.style.borderRadius).toBe('0px 8px 8px 0px');
+    expect(callout!.style.borderLeftWidth || callout!.style.borderLeft).toContain('3px');
+    expect((callout!.style.borderLeft || callout!.style.borderLeftColor).toLowerCase()).toMatch(
+      /#c86446|rgb\(200,\s*100,\s*70\)/
+    );
+    expect(callout!.style.fontFamily).toContain('Inter');
+    expect(callout!.style.fontSize).toBe('14.5px');
+    expect(callout!.style.lineHeight).toBe('1.65');
+
+    const calloutTitle = callout!.querySelector<HTMLElement>('.morph-callout-title');
+    expect(calloutTitle).not.toBeNull();
+    expect(calloutTitle!.tagName).toBe('SPAN');
+    const calloutTitleText = calloutTitle!.querySelector<HTMLElement>('.morph-callout-title-text');
+    expect(calloutTitleText).not.toBeNull();
+    expect(calloutTitleText!.style.fontWeight).toBe('600');
+
     const calloutBody = callout!.querySelector<HTMLElement>('.morph-callout-body');
     expect(calloutBody).not.toBeNull();
-    const calloutPara = calloutBody!.querySelector<HTMLElement>('p');
+    expect(calloutBody!.tagName).toBe('SPAN');
+    const calloutPara = calloutBody!.querySelector<HTMLElement>('.morph-p');
     expect(calloutPara).not.toBeNull();
-    expect(calloutPara!.style.marginBottom).toBe('0px');
+    expect(calloutPara!.tagName).toBe('SPAN');
+    expect(calloutPara!.style.fontFamily).toContain('Inter');
+    expect(calloutPara!.style.fontSize).toBe('14.5px');
+    expect(calloutPara!.style.lineHeight).toBe('1.65');
     for (const child of Array.from(calloutBody!.childNodes)) {
       if (child.nodeType === window.Node.TEXT_NODE) {
         expect((child.textContent || '').trim().length).toBeGreaterThan(0);
@@ -703,10 +766,17 @@ describe('TestStyleDrawerCustomization', () => {
 
     const table = previewStage.querySelector<HTMLElement>('table.morph-table');
     expect(table).not.toBeNull();
+    expect(table!.style.fontSize).toBe('13px');
     const th = table!.querySelector<HTMLElement>('th');
     const td = table!.querySelector<HTMLElement>('td');
     expect(th).not.toBeNull();
     expect(td).not.toBeNull();
+    expect(th!.style.padding).toBe('8px 6px');
+    expect(td!.style.padding).toBe('8px 6px');
+    const tableCode = table!.querySelector<HTMLElement>('code');
+    expect(tableCode).not.toBeNull();
+    expect(tableCode!.style.fontSize).toBe('12px');
+    expect(tableCode!.style.whiteSpace).toBe('normal');
     expect((th!.style.borderBottom || th!.style.borderBottomColor).toLowerCase()).toMatch(
       /#141413|rgb\(20,\s*20,\s*19\)/
     );
@@ -824,47 +894,144 @@ describe('TestStyleDrawerCustomization', () => {
       const docEl = root.querySelector<HTMLElement>('.morph-doc');
       expect(docEl).not.toBeNull();
       expect(docEl!.style.fontFamily).toMatch(/Iowan Old Style|Palatino|Songti SC/i);
-      expect(docEl!.style.fontSize).toBe('17px');
-      expect(docEl!.style.lineHeight).toBe('1.85');
+      expect(docEl!.style.fontSize).toBe('15px');
+      expect(docEl!.style.lineHeight).toBe('1.75');
       expect(docEl!.style.color.toLowerCase()).toMatch(/#282828|rgb\(40,\s*40,\s*40\)/);
 
-      // b) h1.morph-h1 centered 31px title
+      // b) h1.morph-h1 centered 24px title
       const h1 = root.querySelector<HTMLElement>('h1.morph-h1');
       expect(h1).not.toBeNull();
-      expect(h1!.style.fontSize).toBe('31px');
-      expect(h1!.style.lineHeight).toBe('1.38');
+      expect(h1!.style.fontSize).toBe('24px');
+      expect(h1!.style.lineHeight).toBe('1.35');
       expect(h1!.style.fontWeight).toBe('600');
       expect(h1!.style.textAlign).toBe('center');
+      expect(h1!.style.marginTop).toBe('0px');
+      expect(h1!.style.marginBottom).toBe('22px');
 
-      // c) h2.morph-h2 and h3.morph-h3 hierarchy
+      // c) h2.morph-h2 and h3.morph-h3 hierarchy & vertical spacing
       const h2 = root.querySelector<HTMLElement>('h2.morph-h2');
       const h3 = root.querySelector<HTMLElement>('h3.morph-h3');
       expect(h2).not.toBeNull();
       expect(h3).not.toBeNull();
-      expect(h2!.style.fontSize).toBe('23px');
+      expect(h2!.style.fontSize).toBe('20px');
       expect(h2!.style.lineHeight).toBe('1.4');
       expect(h2!.style.fontWeight).toBe('600');
-      expect(h3!.style.fontSize).toBe('19px');
-      expect(h3!.style.lineHeight).toBe('1.4');
+      expect(h2!.style.marginTop).toBe('28px');
+      expect(h2!.style.marginBottom).toBe('16px');
+      expect(h3!.style.fontSize).toBe('17px');
+      expect(h3!.style.lineHeight).toBe('1.45');
       expect(h3!.style.fontWeight).toBe('600');
+      expect(h3!.style.marginTop).toBe('22px');
+      expect(h3!.style.marginBottom).toBe('12px');
 
-      // d) blockquote.morph-quote slate-blue left border & ink
-      const quote = root.querySelector<HTMLElement>('blockquote.morph-quote');
+      const bodyPara = root.querySelector<HTMLElement>('p.morph-p');
+      expect(bodyPara).not.toBeNull();
+      expect(bodyPara!.style.fontSize).toBe('15px');
+      expect(bodyPara!.style.lineHeight).toBe('1.75');
+      expect(bodyPara!.style.fontFamily).toMatch(/Iowan Old Style|Palatino|Songti SC/i);
+      expect(bodyPara!.style.color.toLowerCase()).toMatch(/#282828|rgb\(40,\s*40,\s*40\)/);
+
+      const ol = root.querySelector<HTMLElement>('ol.morph-list');
+      expect(ol).not.toBeNull();
+      expect(ol!.style.marginTop).toBe('0px');
+      expect(ol!.style.marginBottom).toBe('0px');
+      const liSections = Array.from(ol!.querySelectorAll<HTMLElement>(':scope > li > section'));
+      expect(liSections.length).toBeGreaterThanOrEqual(2);
+      for (let i = 0; i < liSections.length; i++) {
+        const sec = liSections[i];
+        expect(sec.style.fontSize).toBe('15px');
+        expect(sec.style.lineHeight).toBe('1.75');
+        expect(sec.style.marginTop).toBe('0px');
+        expect(sec.style.marginBottom).toBe(i === liSections.length - 1 ? '16px' : '6px');
+      }
+
+      // d) strong keeps deep ink (#282828) and em keeps italic with muted slate-blue (#607383)
+      const strong = root.querySelector<HTMLElement>('p strong');
+      expect(strong).not.toBeNull();
+      expect(strong!.style.fontWeight).toBe('600');
+      expect(strong!.style.color.toLowerCase()).toMatch(/#282828|rgb\(40,\s*40,\s*40\)/);
+
+      const em = root.querySelector<HTMLElement>('p em');
+      expect(em).not.toBeNull();
+      expect(em!.style.fontStyle).toBe('italic');
+      expect(em!.style.color.toLowerCase()).toMatch(/#607383|rgb\(96,\s*115,\s*131\)/);
+
+      // e) p.morph-quote slate-blue left border & ink (native <p> with inline <span class="morph-p">)
+      const quote = root.querySelector<HTMLElement>('.morph-quote');
       expect(quote).not.toBeNull();
+      expect(quote!.tagName).toBe('P');
+      expect(root.querySelector('blockquote.morph-quote')).toBeNull();
+      expect(quote!.querySelectorAll('p, div, section, blockquote')).toHaveLength(0);
       expect(quote!.style.borderLeftWidth || quote!.style.borderLeft).toContain('2px');
       expect((quote!.style.borderLeft || quote!.style.borderLeftColor).toLowerCase()).toMatch(
         /#47758f|rgb\(71,\s*117,\s*143\)/
       );
       expect(quote!.style.fontStyle).toBe('normal');
       expect(quote!.style.color.toLowerCase()).toMatch(/#253947|rgb\(37,\s*57,\s*71\)/);
+      expect(quote!.style.marginTop).toBe('0px');
+      expect(quote!.style.marginBottom).toBe('20px');
 
-      // e) link color #47758f
-      const link = root.querySelector<HTMLElement>('p a, a');
-      expect(link).not.toBeNull();
-      expect(link!.style.color.toLowerCase()).toMatch(/#47758f|rgb\(71,\s*117,\s*143\)/);
+      const quotePara = quote!.querySelector<HTMLElement>('.morph-p');
+      expect(quotePara).not.toBeNull();
+      expect(quotePara!.tagName).toBe('SPAN');
+      expect(quotePara!.style.fontFamily).toMatch(/Iowan Old Style|Palatino|Songti SC/i);
+      expect(quotePara!.style.fontSize).toBe('15px');
+      expect(quotePara!.style.lineHeight).toBe('1.7');
+      expect(quotePara!.style.color.toLowerCase()).toMatch(/#253947|rgb\(37,\s*57,\s*71\)/);
 
-      // f) inline code and pre.morph-code
-      const inlineCode = root.querySelector<HTMLElement>(':not(pre) > code');
+      // f) external link degraded to .morph-link-text in wechat target with color #47758f
+      expect(root.querySelector('p a')).toBeNull();
+      const linkText = root.querySelector<HTMLElement>('p .morph-link-text');
+      expect(linkText).not.toBeNull();
+      expect(linkText!.getAttribute('data-original-href')).toBe('https://morphmd.dev');
+      expect(linkText!.textContent).toBe('MorphMD 跨端排版系统 (https://morphmd.dev)');
+      expect(linkText!.style.color.toLowerCase()).toMatch(/#47758f|rgb\(71,\s*117,\s*143\)/);
+
+      // g) Callout modern left-straight right-rounded geometry & native <p> with inline <span>+<br>
+      const callout = root.querySelector<HTMLElement>('.morph-callout');
+      expect(callout).not.toBeNull();
+      expect(callout!.tagName).toBe('P');
+      expect(callout!.querySelectorAll('p, div, section')).toHaveLength(0);
+      expect(callout!.querySelector(':scope > br')).not.toBeNull();
+      expect(callout!.style.marginTop).toBe('0px');
+      expect(callout!.style.marginBottom).toBe('16px');
+      expect(callout!.previousSibling?.nodeType).toBe(window.Node.ELEMENT_NODE);
+      expect(callout!.nextSibling?.nodeType).toBe(window.Node.ELEMENT_NODE);
+      expect(callout!.style.borderRadius).toBe('0px 8px 8px 0px');
+      expect(callout!.style.borderLeftWidth || callout!.style.borderLeft).toContain('3px');
+      expect((callout!.style.borderLeft || callout!.style.borderLeftColor).toLowerCase()).toMatch(
+        /#47758f|rgb\(71,\s*117,\s*143\)/
+      );
+      expect(callout!.style.fontFamily).toMatch(
+        /-apple-system|BlinkMacSystemFont|PingFang SC|sans-serif/i
+      );
+      expect(callout!.style.fontFamily).not.toMatch(/Iowan Old Style|Palatino|Songti SC/i);
+      expect(callout!.style.fontSize).toBe('14.5px');
+      expect(callout!.style.lineHeight).toBe('1.65');
+
+      const calloutTitle = callout!.querySelector<HTMLElement>('.morph-callout-title');
+      expect(calloutTitle).not.toBeNull();
+      expect(calloutTitle!.tagName).toBe('SPAN');
+      const calloutTitleText = calloutTitle!.querySelector<HTMLElement>(
+        '.morph-callout-title-text'
+      );
+      expect(calloutTitleText).not.toBeNull();
+      expect(calloutTitleText!.style.fontWeight).toBe('600');
+
+      const calloutBody = callout!.querySelector<HTMLElement>('.morph-callout-body');
+      expect(calloutBody).not.toBeNull();
+      expect(calloutBody!.tagName).toBe('SPAN');
+      const calloutPara = calloutBody!.querySelector<HTMLElement>('.morph-p');
+      expect(calloutPara).not.toBeNull();
+      expect(calloutPara!.tagName).toBe('SPAN');
+      expect(calloutPara!.style.fontFamily).toMatch(
+        /-apple-system|BlinkMacSystemFont|PingFang SC|sans-serif/i
+      );
+      expect(calloutPara!.style.fontSize).toBe('14.5px');
+      expect(calloutPara!.style.lineHeight).toBe('1.65');
+
+      // h) inline code and pre.morph-code
+      const inlineCode = root.querySelector<HTMLElement>('p > code');
       const codeBlock = root.querySelector<HTMLElement>('pre.morph-code');
       expect(inlineCode).not.toBeNull();
       expect(codeBlock).not.toBeNull();
@@ -875,18 +1042,30 @@ describe('TestStyleDrawerCustomization', () => {
         );
         expect(codeEl.style.color.toLowerCase()).toMatch(/#3d3936|rgb\(61,\s*57,\s*54\)/);
       }
+      expect(codeBlock!.style.whiteSpace).toBe('pre');
+      expect(codeBlock!.style.textAlign).toBe('left');
+      expect(codeBlock!.style.wordBreak).toBe('normal');
+      expect(codeBlock!.style.overflowWrap).toBe('normal');
+      expect(codeBlock!.style.fontSize).toBe('13px');
 
-      // g) table.morph-table fixed layout and slate-tinted academic borders
+      // i) table.morph-table fixed layout, compact 13px font-size, 8px 6px cell padding, and slate-tinted academic borders
       const table = root.querySelector<HTMLElement>('table.morph-table');
       expect(table).not.toBeNull();
       expect(table!.style.tableLayout).toBe('fixed');
       expect(table!.style.marginTop).toBe('0px');
+      expect(table!.style.fontSize).toBe('13px');
+
+      const tableCode = table!.querySelector<HTMLElement>('code');
+      expect(tableCode).not.toBeNull();
+      expect(tableCode!.style.fontSize).toBe('12px');
+      expect(tableCode!.style.whiteSpace).toBe('normal');
 
       const ths = Array.from(table!.querySelectorAll<HTMLElement>('th'));
       const tds = Array.from(table!.querySelectorAll<HTMLElement>('td'));
       expect(ths.length).toBeGreaterThan(0);
       expect(tds.length).toBeGreaterThan(0);
       for (const th of ths) {
+        expect(th.style.padding).toBe('8px 6px');
         expect(th.style.borderTopWidth || th.style.borderTop).toContain('0px');
         expect(th.style.borderLeftWidth || th.style.borderLeft).toContain('0px');
         expect(th.style.borderRightWidth || th.style.borderRight).toContain('0px');
@@ -896,6 +1075,7 @@ describe('TestStyleDrawerCustomization', () => {
         );
       }
       for (const td of tds) {
+        expect(td.style.padding).toBe('8px 6px');
         expect(td.style.borderTopWidth || td.style.borderTop).toContain('0px');
         expect(td.style.borderLeftWidth || td.style.borderLeft).toContain('0px');
         expect(td.style.borderRightWidth || td.style.borderRight).toContain('0px');
@@ -908,7 +1088,7 @@ describe('TestStyleDrawerCustomization', () => {
       // h) Flow blocks have single-direction vertical margin (marginTop === '0px')
       const flowBlocks = Array.from(
         root.querySelectorAll<HTMLElement>(
-          'p.morph-p, blockquote.morph-quote, pre.morph-code, .morph-callout, .morph-math-display, ul.morph-list, ol.morph-list'
+          'p.morph-p, p.morph-quote, pre.morph-code, .morph-callout, .morph-math-display, ul.morph-list, ol.morph-list'
         )
       );
       expect(flowBlocks.length).toBeGreaterThan(0);
@@ -1175,7 +1355,7 @@ describe('TestDeliveryCopyAndExport', () => {
     expect(wechatDoc.querySelector('h1')?.textContent).toContain('让内容自由流动');
     expect(wechatDoc.querySelector('h2')?.textContent).toContain('核心功能');
     expect(wechatDoc.querySelector('strong')?.textContent).toBe('三种发布形态');
-    expect(wechatDoc.querySelector('blockquote')?.textContent).toContain('写一次，自由发布。');
+    expect(wechatDoc.querySelector('p.morph-quote')?.textContent).toContain('写一次，自由发布。');
     expect(wechatDoc.querySelectorAll('ul li')).toHaveLength(2);
     expect(wechatDoc.querySelector('img')?.getAttribute('src')).toBe(asset.dataUrl);
     expect(wechatPlain).not.toMatch(/\n{3,}/);
@@ -1281,7 +1461,7 @@ describe('TestDeliveryCopyAndExport', () => {
 
     const firstDoc = documentOf(firstCopy.get('text/html')!);
     expect(firstDoc.querySelector('strong')?.textContent).toBe('加粗强调');
-    expect(firstDoc.querySelector('blockquote')?.textContent).toContain('引用段落内容。');
+    expect(firstDoc.querySelector('p.morph-quote')?.textContent).toContain('引用段落内容。');
     expect(firstDoc.querySelectorAll('ul li')).toHaveLength(2);
     expect(firstDoc.querySelector('img')?.getAttribute('src')).toBe(asset.dataUrl);
     expect(firstCopy.get('text/plain')).not.toMatch(/\n{3,}/);
@@ -1381,8 +1561,9 @@ describe('class TestWorkbenchUi', () => {
       expect(h3Size).toBeGreaterThan(pSize);
     }
 
-    const previewQuote = previewContainer!.querySelector<HTMLElement>('blockquote.morph-quote');
+    const previewQuote = previewContainer!.querySelector<HTMLElement>('p.morph-quote');
     expect(previewQuote).not.toBeNull();
+    expect(previewContainer!.querySelector('blockquote.morph-quote')).toBeNull();
     expect(previewQuote!.style.marginLeft).toBe('0px');
     expect(previewQuote!.style.marginRight).toBe('0px');
 
@@ -1390,10 +1571,9 @@ describe('class TestWorkbenchUi', () => {
     expect(computedQuote.marginLeft).toBe('0px');
     expect(computedQuote.marginRight).toBe('0px');
 
-    const quoteParagraphs = previewQuote!.querySelectorAll<HTMLElement>('p');
+    const quoteParagraphs = previewQuote!.querySelectorAll<HTMLElement>('span.morph-p');
     expect(quoteParagraphs.length).toBeGreaterThanOrEqual(1);
-    const lastQuoteParagraph = quoteParagraphs[quoteParagraphs.length - 1];
-    expect(lastQuoteParagraph.style.marginBottom).toBe('0px');
+    expect(previewQuote!.querySelectorAll('p, div, section, blockquote')).toHaveLength(0);
 
     const copiedImg = copiedDoc.querySelector<HTMLElement>('img.morph-img');
     expect(copiedImg).not.toBeNull();
@@ -1413,17 +1593,22 @@ describe('class TestWorkbenchUi', () => {
     expect(previewContainer!.querySelector('h2.morph-h2')).not.toBeNull();
     expect(previewContainer!.querySelector('h3.morph-h3')).not.toBeNull();
 
-    // Inline formatting inside paragraphs: strong, em, inline code, link
+    // Inline formatting inside paragraphs: strong, em, inline code, degraded external link in wechat
     expect(previewContainer!.querySelector('p strong')).not.toBeNull();
     expect(previewContainer!.querySelector('p em')).not.toBeNull();
     const inlineCode = previewContainer!.querySelector<HTMLElement>(':not(pre) > code');
     expect(inlineCode).not.toBeNull();
     expect(inlineCode!.style.backgroundColor).toBeTruthy();
     expect(inlineCode!.style.borderRadius).toBeTruthy();
-    expect(previewContainer!.querySelector('p a, a')).not.toBeNull();
+    expect(previewContainer!.querySelector('p a')).toBeNull();
+    const degradedLink = previewContainer!.querySelector<HTMLElement>('p .morph-link-text');
+    expect(degradedLink).not.toBeNull();
+    expect(degradedLink!.getAttribute('data-original-href')).toBe('https://morphmd.dev');
+    expect(degradedLink!.textContent).toBe('MorphMD 跨端排版系统 (https://morphmd.dev)');
 
-    // Blockquote
-    expect(previewContainer!.querySelector('blockquote.morph-quote')).not.toBeNull();
+    // Quote block (converted to native <p class="morph-quote"> in wechat view)
+    expect(previewContainer!.querySelector('p.morph-quote')).not.toBeNull();
+    expect(previewContainer!.querySelector('blockquote.morph-quote')).toBeNull();
 
     // Callout block
     const callout = previewContainer!.querySelector<HTMLElement>('.morph-callout');
@@ -1594,7 +1779,7 @@ describe('class TestWorkbenchUi', () => {
       // d) Flow blocks all have single-direction vertical margin (marginTop === '0px')
       const flowBlocks = Array.from(
         root.querySelectorAll<HTMLElement>(
-          'p.morph-p, blockquote.morph-quote, pre.morph-code, .morph-callout, .morph-math-display, ul.morph-list, ol.morph-list'
+          'p.morph-p, p.morph-quote, pre.morph-code, .morph-callout, .morph-math-display, ul.morph-list, ol.morph-list'
         )
       );
       expect(flowBlocks.length).toBeGreaterThan(0);

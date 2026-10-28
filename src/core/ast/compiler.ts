@@ -112,9 +112,26 @@ function normalizeOrphanTableHtml() {
 
 function stripTableInternalWhitespace() {
   return (tree: any) => {
+    if (Array.isArray(tree.children)) {
+      tree.children = tree.children.filter(
+        (child: any) =>
+          !(child.type === 'text' && typeof child.value === 'string' && child.value.trim() === '')
+      );
+    }
     visit(tree, 'element', (node: any) => {
       if (
-        ['table', 'thead', 'tbody', 'tfoot', 'tr', 'colgroup'].includes(node.tagName) &&
+        [
+          'table',
+          'thead',
+          'tbody',
+          'tfoot',
+          'tr',
+          'colgroup',
+          'blockquote',
+          'ul',
+          'ol',
+          'figure',
+        ].includes(node.tagName) &&
         Array.isArray(node.children)
       ) {
         node.children = node.children.filter(

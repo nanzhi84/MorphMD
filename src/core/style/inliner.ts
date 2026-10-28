@@ -84,7 +84,7 @@ ${tokenCssLines}
       line-height: 1.38;
       font-weight: 700;
       margin-top: 0px;
-      margin-bottom: 20px;
+      margin-bottom: 22px;
     }
     .morph-h2 {
       font-family: var(--morph-font-serif);
@@ -92,7 +92,7 @@ ${tokenCssLines}
       line-height: 1.4;
       font-weight: 600;
       margin-top: 28px;
-      margin-bottom: 14px;
+      margin-bottom: 16px;
     }
     .morph-h3 {
       font-family: var(--morph-font-serif);
@@ -100,25 +100,46 @@ ${tokenCssLines}
       line-height: 1.42;
       font-weight: 600;
       margin-top: 22px;
-      margin-bottom: 10px;
+      margin-bottom: 12px;
     }
     .morph-h4 {
       font-family: var(--morph-font-serif);
       font-size: 16px;
       line-height: 1.45;
       font-weight: 600;
-      margin-top: 18px;
+      margin-top: 16px;
       margin-bottom: 8px;
     }
     .morph-p {
+      font-family: var(--morph-font-sans);
+      font-size: var(--morph-body-size);
+      line-height: var(--morph-line-height);
+      color: var(--morph-ink);
       margin-top: 0px;
       margin-bottom: var(--morph-block-gap);
+    }
+    .morph-list {
+      font-family: var(--morph-font-sans);
+      font-size: var(--morph-body-size);
       line-height: var(--morph-line-height);
+      color: var(--morph-ink);
+      margin-top: 0px;
+      margin-bottom: 16px;
+      padding-left: 22px;
+    }
+    .morph-list li {
+      font-family: var(--morph-font-sans);
+      font-size: var(--morph-body-size);
+      line-height: var(--morph-line-height);
+      color: var(--morph-ink);
+      margin-top: 0px;
+      margin-bottom: 6px;
+      padding-left: 4px;
     }
     .morph-quote {
       margin-top: 0px;
       margin-right: 0px;
-      margin-bottom: 18px;
+      margin-bottom: 20px;
       margin-left: 0px;
     }
     .morph-quote .morph-p,
@@ -148,7 +169,52 @@ ${tokenCssLines}
       margin-bottom: 16px;
       overflow-x: auto;
     }
-    .morph-code { font-family: var(--morph-font-mono); overflow-x: auto; }
+    .morph-callout {
+      background-color: #f7f7f5;
+      border-left: 3px solid var(--morph-accent);
+      border-radius: 0px 8px 8px 0px;
+      padding: 14px 16px 14px 18px;
+      margin-top: 0px;
+      margin-bottom: 16px;
+      font-family: var(--morph-font-sans);
+      font-size: 14.5px;
+      line-height: 1.65;
+      color: var(--morph-ink);
+    }
+    .morph-callout-title {
+      font-family: var(--morph-font-sans);
+      font-weight: 600;
+      font-size: 14.5px;
+      line-height: 1.9;
+      margin-top: 0px;
+      margin-bottom: 6px;
+      color: var(--morph-ink);
+    }
+    .morph-callout-body {
+      font-family: var(--morph-font-sans);
+      font-size: 14.5px;
+      line-height: 1.65;
+      color: var(--morph-ink);
+      margin: 0px;
+      padding: 0px;
+    }
+    .morph-callout-body p,
+    .morph-callout-body .morph-p {
+      font-family: var(--morph-font-sans);
+      font-size: 14.5px;
+      line-height: 1.65;
+      color: var(--morph-ink);
+      margin-top: 0px;
+      margin-bottom: 0px;
+    }
+    .morph-code {
+      font-family: var(--morph-font-mono);
+      overflow-x: auto;
+      white-space: pre;
+      text-align: left;
+      word-break: normal;
+      overflow-wrap: normal;
+    }
     ${analysis.sanitizedCss}
   `;
 
@@ -445,13 +511,34 @@ ${tokenCssLines}
             if (recordedProps) recordedProps.push(['text-decoration', ruleTextDecoration]);
           }
 
+          // border-radius shorthand preservation (modern Chromium expands border-radius into border-top-left-radius etc.)
+          const ruleBorderRadius = rule.style.getPropertyValue('border-radius');
+          if (ruleBorderRadius) {
+            const computedBorderRadius = computed.getPropertyValue('border-radius') || ruleBorderRadius;
+            elStyleMap.set('border-radius', computedBorderRadius);
+            if (recordedProps) recordedProps.push(['border-radius', computedBorderRadius]);
+          }
+
+          // padding shorthand preservation (modern Chromium expands padding into padding-top/right/bottom/left)
+          const rulePadding = rule.style.getPropertyValue('padding');
+          if (rulePadding) {
+            const computedPadding = computed.getPropertyValue('padding') || rulePadding;
+            elStyleMap.set('padding', computedPadding);
+            if (recordedProps) recordedProps.push(['padding', computedPadding]);
+          }
+
           for (let i = 0; i < rule.style.length; i++) {
             const prop = rule.style[i];
             if (prop.startsWith('--')) continue;
 
             const authoredVal = rule.style.getPropertyValue(prop);
             let val =
-              ((prop === 'width' || prop === 'height' || prop === 'max-width' || prop === 'max-height') && authoredVal) ||
+              ((prop === 'width' ||
+                prop === 'height' ||
+                prop === 'max-width' ||
+                prop === 'max-height' ||
+                (prop === 'line-height' && /^\d*\.?\d+$/.test(authoredVal.trim()))) &&
+                authoredVal) ||
               (authoredVal && authoredVal.includes('var('))
                 ? authoredVal
                 : computed.getPropertyValue(prop) || authoredVal;

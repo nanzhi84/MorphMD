@@ -511,11 +511,55 @@ export function normalizeWeChatStructureAndStyles(
 ): void {
   const canSetProp = (prop: string) => !allowedStyleProps || allowedStyleProps.has(prop);
 
+  const rootStyle = (rootContainer as HTMLElement).style;
+
   // 0.1 Wrap consecutive inline children of <li> inside <section> so WeChat ProseMirror
-  // does not split bold leads (e.g. <li><strong>Title</strong>：Body</li>) onto separate lines
-  rootContainer.querySelectorAll('li').forEach((li) => {
+  // does not split bold leads (e.g. <li><strong>Title</strong>：Body</li>) onto separate lines,
+  // and inline typography + bottom margins directly onto <li> > <section> since WeChat strips
+  // style attributes from <ol>, <ul>, and <li>.
+  const listMarginMap = new WeakMap<Element, string>();
+  rootContainer.querySelectorAll<HTMLElement>('ul, ol').forEach((listEl) => {
+    const mb = listEl.style.getPropertyValue('margin-bottom') || '16px';
+    listMarginMap.set(listEl, mb);
+    if (canSetProp('margin-top')) listEl.style.setProperty('margin-top', '0px');
+    if (canSetProp('margin-bottom')) listEl.style.setProperty('margin-bottom', '0px');
+  });
+
+  rootContainer.querySelectorAll<HTMLElement>('li').forEach((li) => {
     const doc = li.ownerDocument;
     if (!doc) return;
+    const parentList = li.parentElement;
+    const parentListStyle = (parentList as HTMLElement | null)?.style;
+    const liMarginBottom = li.style.getPropertyValue('margin-bottom') || '6px';
+    const ff =
+      li.style.getPropertyValue('font-family') ||
+      parentListStyle?.getPropertyValue('font-family') ||
+      rootStyle?.getPropertyValue('font-family') ||
+      '';
+    const fs =
+      li.style.getPropertyValue('font-size') ||
+      parentListStyle?.getPropertyValue('font-size') ||
+      rootStyle?.getPropertyValue('font-size') ||
+      '';
+    const lh =
+      li.style.getPropertyValue('line-height') ||
+      parentListStyle?.getPropertyValue('line-height') ||
+      rootStyle?.getPropertyValue('line-height') ||
+      '';
+    const color =
+      li.style.getPropertyValue('color') ||
+      parentListStyle?.getPropertyValue('color') ||
+      rootStyle?.getPropertyValue('color') ||
+      '';
+    const ls =
+      li.style.getPropertyValue('letter-spacing') ||
+      parentListStyle?.getPropertyValue('letter-spacing') ||
+      rootStyle?.getPropertyValue('letter-spacing') ||
+      '';
+
+    if (canSetProp('margin-top')) li.style.setProperty('margin-top', '0px');
+    if (canSetProp('margin-bottom')) li.style.setProperty('margin-bottom', '0px');
+
     let currentSection: HTMLElement | null = null;
     const childNodes = Array.from(li.childNodes);
     for (const node of childNodes) {
@@ -536,6 +580,67 @@ export function normalizeWeChatStructureAndStyles(
         li.insertBefore(currentSection, node);
       }
       currentSection.appendChild(node);
+    }
+
+    const directLis = parentList
+      ? Array.from(parentList.children).filter((c) => c.tagName.toLowerCase() === 'li')
+      : [];
+    const isLastLiInList = directLis.length > 0 && directLis[directLis.length - 1] === li;
+    const isTopLevelList = Boolean(parentList && !parentList.parentElement?.closest('li'));
+
+    const directSections = Array.from(li.children).filter(
+      (c) => c.tagName.toLowerCase() === 'section'
+    ) as HTMLElement[];
+    for (const sec of directSections) {
+      if (ff && canSetProp('font-family') && !sec.style.getPropertyValue('font-family')) {
+        sec.style.setProperty('font-family', ff);
+      }
+      if (fs && canSetProp('font-size') && !sec.style.getPropertyValue('font-size')) {
+        sec.style.setProperty('font-size', fs);
+      }
+      if (lh && canSetProp('line-height') && !sec.style.getPropertyValue('line-height')) {
+        sec.style.setProperty('line-height', lh);
+      }
+      if (color && canSetProp('color') && !sec.style.getPropertyValue('color')) {
+        sec.style.setProperty('color', color);
+      }
+      if (ls && canSetProp('letter-spacing') && !sec.style.getPropertyValue('letter-spacing')) {
+        sec.style.setProperty('letter-spacing', ls);
+      }
+      if (canSetProp('margin-top') && !sec.style.getPropertyValue('margin-top')) {
+        sec.style.setProperty('margin-top', '0px');
+      }
+      if (canSetProp('margin-bottom') && !sec.style.getPropertyValue('margin-bottom')) {
+        const isLastChildOfLi = li.lastElementChild === sec;
+        const targetMb = isLastChildOfLi
+          ? isLastLiInList && isTopLevelList && parentList
+            ? listMarginMap.get(parentList) || '16px'
+            : liMarginBottom
+          : '4px';
+        sec.style.setProperty('margin-bottom', targetMb);
+      }
+    }
+  });
+
+  // 0.15 Ensure every <p class="morph-p"> explicitly carries root typography (font-family,
+  // font-size, line-height, color) so unwrapping .morph-doc in WeChat never reverts <p> to 17px
+  rootContainer.querySelectorAll<HTMLElement>('p.morph-p').forEach((p) => {
+    if (p.closest('.morph-callout, blockquote, .morph-quote')) return;
+    const ff = rootStyle?.getPropertyValue('font-family');
+    const fs = rootStyle?.getPropertyValue('font-size');
+    const lh = rootStyle?.getPropertyValue('line-height');
+    const color = rootStyle?.getPropertyValue('color');
+    if (ff && canSetProp('font-family') && !p.style.getPropertyValue('font-family')) {
+      p.style.setProperty('font-family', ff);
+    }
+    if (fs && canSetProp('font-size') && !p.style.getPropertyValue('font-size')) {
+      p.style.setProperty('font-size', fs);
+    }
+    if (lh && canSetProp('line-height') && !p.style.getPropertyValue('line-height')) {
+      p.style.setProperty('line-height', lh);
+    }
+    if (color && canSetProp('color') && !p.style.getPropertyValue('color')) {
+      p.style.setProperty('color', color);
     }
   });
 
@@ -565,6 +670,397 @@ export function normalizeWeChatStructureAndStyles(
         }
       }
     });
+
+  // 0.3 Degrade external <a href="..."> links to inline text (.morph-link-text) because
+  // WeChat Official Account forbids embedding non-WeChat external hyperlinks in article body
+  rootContainer.querySelectorAll<HTMLElement>('a[href]').forEach((anchor) => {
+    const href = (anchor.getAttribute('href') || '').trim();
+    const isWeChatInternalOrAnchor =
+      !href ||
+      href.startsWith('#') ||
+      /^https?:\/\/mp\.weixin\.qq\.com(?:\/|$)/i.test(href);
+    if (isWeChatInternalOrAnchor) return;
+
+    const doc = anchor.ownerDocument;
+    if (!doc) return;
+
+    const span = doc.createElement('span');
+    for (const attr of Array.from(anchor.attributes)) {
+      const attrName = attr.name.toLowerCase();
+      if (attrName === 'href' || attrName === 'target' || attrName === 'rel') {
+        continue;
+      }
+      span.setAttribute(attr.name, attr.value);
+    }
+    span.classList.add('morph-link-text');
+    span.setAttribute('data-original-href', href);
+
+    span.style.removeProperty('border-bottom');
+    span.style.removeProperty('border-bottom-width');
+    span.style.removeProperty('border-bottom-style');
+    span.style.removeProperty('border-bottom-color');
+    span.style.removeProperty('padding-bottom');
+    span.style.removeProperty('text-decoration');
+
+    while (anchor.firstChild) {
+      span.appendChild(anchor.firstChild);
+    }
+    const rawText = (span.textContent || '').trim();
+    if (rawText && !rawText.includes(href)) {
+      span.appendChild(doc.createTextNode(` (${href})`));
+    } else if (!rawText) {
+      span.textContent = href;
+    }
+
+    const nodeId = anchor.getAttribute('data-node-id') || undefined;
+    const rangeStr = anchor.getAttribute('data-source-range');
+    const sourceRange = rangeStr ? (rangeStr.split('-').map(Number) as [number, number]) : undefined;
+
+    anchor.parentNode?.replaceChild(span, anchor);
+    diagnostics.push({
+      code: 'structure/wechat-external-link-degraded',
+      message: `Degraded external link "${href}" to inline text for WeChat Official Account compatibility.`,
+      severity: 'info',
+      targetId: 'wechat',
+      nodeId,
+      sourceRange,
+    });
+  });
+
+  // 0.4 Convert .morph-callout internal .morph-callout-title, .morph-callout-body, and .morph-p
+  // into inline <span> elements separated by direct <br> children (zero <p>, <div>, or <section>
+  // descendants), and then convert the outer .morph-callout container from <div> to a native <p>
+  // (<p class="morph-callout ...">). Because <p> is ProseMirror's native paragraph node and all
+  // descendants are valid HTML5 phrasing content (<span> + <br>), WeChat's editor preserves 100%
+  // of the callout box styling without ever injecting template-card empty <p><br></p> lines around it.
+  rootContainer.querySelectorAll<HTMLElement>('.morph-callout').forEach((calloutEl) => {
+    const doc = calloutEl.ownerDocument;
+    if (!doc) return;
+
+    const targetCallout = calloutEl;
+    if (canSetProp('margin-top') && !targetCallout.style.getPropertyValue('margin-top')) {
+      targetCallout.style.setProperty('margin-top', '0px');
+    }
+    if (canSetProp('margin-bottom') && !targetCallout.style.getPropertyValue('margin-bottom')) {
+      targetCallout.style.setProperty('margin-bottom', '16px');
+    }
+    const calloutFf =
+      targetCallout.style.getPropertyValue('font-family') ||
+      rootStyle?.getPropertyValue('font-family') ||
+      '';
+    const calloutFs = targetCallout.style.getPropertyValue('font-size') || '14.5px';
+    const calloutLh = targetCallout.style.getPropertyValue('line-height') || '1.65';
+    const calloutColor =
+      targetCallout.style.getPropertyValue('color') ||
+      rootStyle?.getPropertyValue('color') ||
+      '#1f1e1d';
+    if (calloutColor && canSetProp('color') && !targetCallout.style.getPropertyValue('color')) {
+      targetCallout.style.setProperty('color', calloutColor);
+    }
+
+    targetCallout.querySelectorAll<HTMLElement>('.morph-callout-title').forEach((titleEl) => {
+      let targetTitle = titleEl;
+      if (titleEl.tagName.toLowerCase() !== 'span') {
+        const span = doc.createElement('span');
+        for (const attr of Array.from(titleEl.attributes)) {
+          span.setAttribute(attr.name, attr.value);
+        }
+        while (titleEl.firstChild) {
+          span.appendChild(titleEl.firstChild);
+        }
+        titleEl.parentNode?.replaceChild(span, titleEl);
+        targetTitle = span;
+      }
+
+      targetTitle.style.removeProperty('margin');
+      targetTitle.style.removeProperty('margin-top');
+      targetTitle.style.removeProperty('margin-bottom');
+      targetTitle.style.removeProperty('padding');
+      targetTitle.style.removeProperty('padding-top');
+      targetTitle.style.removeProperty('padding-bottom');
+
+      const fw = targetTitle.style.getPropertyValue('font-weight') || '600';
+      const color = targetTitle.style.getPropertyValue('color') || calloutColor;
+      const fs = targetTitle.style.getPropertyValue('font-size') || calloutFs;
+      const ff = targetTitle.style.getPropertyValue('font-family') || calloutFf;
+      const ls = targetTitle.style.getPropertyValue('letter-spacing');
+      const lh = targetTitle.style.getPropertyValue('line-height') || '1.9';
+      if (canSetProp('font-weight')) targetTitle.style.setProperty('font-weight', fw);
+      if (color && canSetProp('color')) targetTitle.style.setProperty('color', color);
+      if (fs && canSetProp('font-size')) targetTitle.style.setProperty('font-size', fs);
+      if (ff && canSetProp('font-family')) targetTitle.style.setProperty('font-family', ff);
+      if (lh && canSetProp('line-height')) targetTitle.style.setProperty('line-height', lh);
+
+      if (!targetTitle.querySelector('.morph-callout-title-text')) {
+        const titleSpan = doc.createElement('span');
+        titleSpan.className = 'morph-callout-title-text';
+        if (canSetProp('font-weight')) titleSpan.style.setProperty('font-weight', fw);
+        if (color && canSetProp('color')) titleSpan.style.setProperty('color', color);
+        if (fs && canSetProp('font-size')) titleSpan.style.setProperty('font-size', fs);
+        if (ff && canSetProp('font-family')) titleSpan.style.setProperty('font-family', ff);
+        if (ls && canSetProp('letter-spacing')) titleSpan.style.setProperty('letter-spacing', ls);
+
+        while (targetTitle.firstChild) {
+          titleSpan.appendChild(targetTitle.firstChild);
+        }
+        targetTitle.appendChild(titleSpan);
+      }
+
+      const nextSib = targetTitle.nextElementSibling;
+      if (!nextSib || nextSib.tagName.toLowerCase() !== 'br') {
+        const br = doc.createElement('br');
+        targetTitle.parentNode?.insertBefore(br, targetTitle.nextSibling);
+      }
+    });
+
+    targetCallout.querySelectorAll<HTMLElement>('.morph-callout-body').forEach((bodyEl) => {
+      const innerBlocks = Array.from(bodyEl.children).filter((c) =>
+        /^(?:p|div|section)$/i.test(c.tagName)
+      ) as HTMLElement[];
+
+      const createBodySpanShell = (): HTMLElement => {
+        const bodySpan = doc.createElement('span');
+        for (const attr of Array.from(bodyEl.attributes)) {
+          bodySpan.setAttribute(attr.name, attr.value);
+        }
+        bodySpan.style.removeProperty('margin');
+        bodySpan.style.removeProperty('margin-top');
+        bodySpan.style.removeProperty('margin-bottom');
+        bodySpan.style.removeProperty('padding');
+        bodySpan.style.removeProperty('padding-top');
+        bodySpan.style.removeProperty('padding-bottom');
+        if (calloutFf && canSetProp('font-family') && !bodySpan.style.getPropertyValue('font-family')) {
+          bodySpan.style.setProperty('font-family', calloutFf);
+        }
+        if (calloutFs && canSetProp('font-size') && !bodySpan.style.getPropertyValue('font-size')) {
+          bodySpan.style.setProperty('font-size', calloutFs);
+        }
+        if (calloutLh && canSetProp('line-height') && !bodySpan.style.getPropertyValue('line-height')) {
+          bodySpan.style.setProperty('line-height', calloutLh);
+        }
+        if (calloutColor && canSetProp('color') && !bodySpan.style.getPropertyValue('color')) {
+          bodySpan.style.setProperty('color', calloutColor);
+        }
+        return bodySpan;
+      };
+
+      if (innerBlocks.length > 0) {
+        const parent = bodyEl.parentNode;
+        if (!parent) return;
+        innerBlocks.forEach((blk, idx) => {
+          if (idx > 0) {
+            parent.insertBefore(doc.createElement('br'), bodyEl);
+          }
+          const bodySpan = createBodySpanShell();
+          const pSpan = doc.createElement('span');
+          for (const attr of Array.from(blk.attributes)) {
+            pSpan.setAttribute(attr.name, attr.value);
+          }
+          pSpan.classList.add('morph-p');
+          pSpan.style.removeProperty('margin');
+          pSpan.style.removeProperty('margin-top');
+          pSpan.style.removeProperty('margin-bottom');
+          if (calloutFf && canSetProp('font-family') && !pSpan.style.getPropertyValue('font-family')) {
+            pSpan.style.setProperty('font-family', calloutFf);
+          }
+          if (calloutFs && canSetProp('font-size') && !pSpan.style.getPropertyValue('font-size')) {
+            pSpan.style.setProperty('font-size', calloutFs);
+          }
+          if (calloutLh && canSetProp('line-height') && !pSpan.style.getPropertyValue('line-height')) {
+            pSpan.style.setProperty('line-height', calloutLh);
+          }
+          if (calloutColor && canSetProp('color') && !pSpan.style.getPropertyValue('color')) {
+            pSpan.style.setProperty('color', calloutColor);
+          }
+          while (blk.firstChild) {
+            pSpan.appendChild(blk.firstChild);
+          }
+          bodySpan.appendChild(pSpan);
+          parent.insertBefore(bodySpan, bodyEl);
+        });
+        bodyEl.remove();
+      } else {
+        const bodySpan = createBodySpanShell();
+        while (bodyEl.firstChild) {
+          bodySpan.appendChild(bodyEl.firstChild);
+        }
+        bodyEl.parentNode?.replaceChild(bodySpan, bodyEl);
+      }
+    });
+
+    // Defensive cleanup: convert any remaining block descendants inside .morph-callout to <span>
+    targetCallout
+      .querySelectorAll<HTMLElement>('p, div, section, blockquote, pre, ul, ol, li, h1, h2, h3, h4, h5, h6')
+      .forEach((remEl) => {
+        const span = doc.createElement('span');
+        for (const attr of Array.from(remEl.attributes)) {
+          span.setAttribute(attr.name, attr.value);
+        }
+        span.style.removeProperty('margin');
+        span.style.removeProperty('margin-top');
+        span.style.removeProperty('margin-bottom');
+        while (remEl.firstChild) {
+          span.appendChild(remEl.firstChild);
+        }
+        remEl.parentNode?.replaceChild(span, remEl);
+      });
+
+    if (targetCallout.tagName.toLowerCase() !== 'p') {
+      const pCallout = doc.createElement('p');
+      for (const attr of Array.from(targetCallout.attributes)) {
+        pCallout.setAttribute(attr.name, attr.value);
+      }
+      while (targetCallout.firstChild) {
+        pCallout.appendChild(targetCallout.firstChild);
+      }
+      targetCallout.parentNode?.replaceChild(pCallout, targetCallout);
+    }
+  });
+
+  // 0.45 Convert standard blockquote (.morph-quote) into a native <p class="morph-quote"> with
+  // inline <span class="morph-p"> + <br> children so WeChat ProseMirror never wraps it in
+  // .js_blockquote_wrap (which injects a secondary rounded grey left bar next to our border-left)
+  rootContainer.querySelectorAll<HTMLElement>('blockquote').forEach((bq) => {
+    if (bq.classList.contains('morph-callout')) return;
+    if (bq.querySelector('table, pre, ul, ol, figure, hr')) return;
+
+    const doc = bq.ownerDocument;
+    if (!doc) return;
+
+    bq.classList.add('morph-quote');
+    if (canSetProp('margin-top') && !bq.style.getPropertyValue('margin-top')) {
+      bq.style.setProperty('margin-top', '0px');
+    }
+    if (canSetProp('margin-bottom') && !bq.style.getPropertyValue('margin-bottom')) {
+      bq.style.setProperty('margin-bottom', '20px');
+    }
+    if (canSetProp('margin-left') && !bq.style.getPropertyValue('margin-left')) {
+      bq.style.setProperty('margin-left', '0px');
+    }
+    if (canSetProp('margin-right') && !bq.style.getPropertyValue('margin-right')) {
+      bq.style.setProperty('margin-right', '0px');
+    }
+
+    const quoteFf =
+      bq.style.getPropertyValue('font-family') ||
+      rootStyle?.getPropertyValue('font-family') ||
+      '';
+    const quoteFs = bq.style.getPropertyValue('font-size') || '15px';
+    const quoteLh = bq.style.getPropertyValue('line-height') || '1.7';
+    const quoteColor =
+      bq.style.getPropertyValue('color') ||
+      rootStyle?.getPropertyValue('color') ||
+      '#3d3c3a';
+    const quoteFontStyle = bq.style.getPropertyValue('font-style') || 'normal';
+
+    if (quoteFf && canSetProp('font-family') && !bq.style.getPropertyValue('font-family')) {
+      bq.style.setProperty('font-family', quoteFf);
+    }
+    if (quoteFs && canSetProp('font-size') && !bq.style.getPropertyValue('font-size')) {
+      bq.style.setProperty('font-size', quoteFs);
+    }
+    if (quoteLh && canSetProp('line-height') && !bq.style.getPropertyValue('line-height')) {
+      bq.style.setProperty('line-height', quoteLh);
+    }
+    if (quoteColor && canSetProp('color') && !bq.style.getPropertyValue('color')) {
+      bq.style.setProperty('color', quoteColor);
+    }
+    if (quoteFontStyle && canSetProp('font-style') && !bq.style.getPropertyValue('font-style')) {
+      bq.style.setProperty('font-style', quoteFontStyle);
+    }
+
+    for (const child of Array.from(bq.childNodes)) {
+      if (child.nodeType === 3 && !(child.textContent || '').trim()) {
+        child.remove();
+      }
+    }
+
+    const innerBlocks = Array.from(bq.children).filter((c) =>
+      /^(?:p|div|section)$/i.test(c.tagName)
+    ) as HTMLElement[];
+
+    innerBlocks.forEach((blk, idx) => {
+      if (idx > 0) {
+        bq.insertBefore(doc.createElement('br'), blk);
+      }
+      const pSpan = doc.createElement('span');
+      for (const attr of Array.from(blk.attributes)) {
+        pSpan.setAttribute(attr.name, attr.value);
+      }
+      pSpan.classList.add('morph-p');
+      pSpan.style.removeProperty('margin');
+      pSpan.style.removeProperty('margin-top');
+      pSpan.style.removeProperty('margin-bottom');
+      pSpan.style.removeProperty('padding');
+      pSpan.style.removeProperty('padding-top');
+      pSpan.style.removeProperty('padding-bottom');
+
+      if (quoteFf && canSetProp('font-family')) {
+        pSpan.style.setProperty('font-family', quoteFf);
+      }
+      if (quoteFs && canSetProp('font-size')) {
+        pSpan.style.setProperty('font-size', quoteFs);
+      }
+      if (quoteLh && canSetProp('line-height')) {
+        pSpan.style.setProperty('line-height', quoteLh);
+      }
+      if (quoteColor && canSetProp('color')) {
+        pSpan.style.setProperty('color', quoteColor);
+      }
+      if (quoteFontStyle && canSetProp('font-style')) {
+        pSpan.style.setProperty('font-style', quoteFontStyle);
+      }
+
+      while (blk.firstChild) {
+        pSpan.appendChild(blk.firstChild);
+      }
+      bq.replaceChild(pSpan, blk);
+    });
+
+    bq
+      .querySelectorAll<HTMLElement>('p, div, section, blockquote, h1, h2, h3, h4, h5, h6')
+      .forEach((remEl) => {
+        const span = doc.createElement('span');
+        for (const attr of Array.from(remEl.attributes)) {
+          span.setAttribute(attr.name, attr.value);
+        }
+        span.style.removeProperty('margin');
+        span.style.removeProperty('margin-top');
+        span.style.removeProperty('margin-bottom');
+        while (remEl.firstChild) {
+          span.appendChild(remEl.firstChild);
+        }
+        remEl.parentNode?.replaceChild(span, remEl);
+      });
+
+    const pQuote = doc.createElement('p');
+    for (const attr of Array.from(bq.attributes)) {
+      pQuote.setAttribute(attr.name, attr.value);
+    }
+    while (bq.firstChild) {
+      pQuote.appendChild(bq.firstChild);
+    }
+    bq.parentNode?.replaceChild(pQuote, bq);
+  });
+
+  // 0.5 Strip inter-block formatting whitespace text nodes (\n) inside block containers
+  // so WeChat ProseMirror never parses stray \n around <section class="morph-callout"> into empty <p><br></p> lines
+  const blockContainers = [
+    rootContainer,
+    ...Array.from(
+      rootContainer.querySelectorAll(
+        '.morph-callout, .morph-callout-body, .morph-quote, blockquote, ul, ol, table, thead, tbody, tfoot, tr, colgroup, figure'
+      )
+    ),
+  ];
+  for (const container of blockContainers) {
+    if (container.closest('pre, code')) continue;
+    for (const child of Array.from(container.childNodes)) {
+      if (child.nodeType === 3 && !(child.textContent || '').trim()) {
+        child.remove();
+      }
+    }
+  }
 
   // 1. Structure Rule #2.2: span[leaf] must not wrap block-level elements (or be left empty after HTML5 block-in-p splitting)
   rootContainer.querySelectorAll('span[leaf]').forEach((span) => {
@@ -647,19 +1143,76 @@ export function normalizeWeChatStructureAndStyles(
     });
   });
 
-  // #1.8 <pre> horizontal scroll safeguard
-  if (canSetProp('overflow-x')) {
-    rootContainer.querySelectorAll<HTMLElement>('pre').forEach((preEl) => {
-      if (hasVisibleText(preEl)) {
-        const style = preEl.style;
-        const ox = getEffectiveOverflowAxis(style, 'x');
-        const ws = style.getPropertyValue('white-space').trim().toLowerCase();
-        if (ox !== 'auto' && ox !== 'scroll' && ws !== 'pre-wrap' && ws !== 'normal') {
-          style.setProperty('overflow-x', 'auto');
+  // #1.8 <pre> horizontal scroll & mobile anti-wrap / anti-justify safeguard
+  rootContainer.querySelectorAll<HTMLElement>('pre').forEach((preEl) => {
+    if (hasVisibleText(preEl)) {
+      const style = preEl.style;
+      const ox = getEffectiveOverflowAxis(style, 'x');
+      const ws = style.getPropertyValue('white-space').trim().toLowerCase();
+      if (canSetProp('overflow-x') && ox !== 'auto' && ox !== 'scroll' && ws !== 'pre-wrap' && ws !== 'normal') {
+        style.setProperty('overflow-x', 'auto');
+      }
+      if (ws !== 'pre-wrap' && ws !== 'normal') {
+        if (canSetProp('white-space') && !ws) {
+          style.setProperty('white-space', 'pre');
+        }
+        if (canSetProp('text-align') && !style.getPropertyValue('text-align')) {
+          style.setProperty('text-align', 'left');
+        }
+        if (canSetProp('word-break') && !style.getPropertyValue('word-break')) {
+          style.setProperty('word-break', 'normal');
+        }
+        if (canSetProp('overflow-wrap') && !style.getPropertyValue('overflow-wrap')) {
+          style.setProperty('overflow-wrap', 'normal');
         }
       }
-    });
-  }
+
+      preEl.querySelectorAll<HTMLElement>('code').forEach((codeEl) => {
+        const cs = codeEl.style;
+        if (canSetProp('white-space') && !cs.getPropertyValue('white-space')) {
+          cs.setProperty('white-space', 'pre');
+        }
+        if (canSetProp('text-align') && !cs.getPropertyValue('text-align')) {
+          cs.setProperty('text-align', 'left');
+        }
+        if (canSetProp('word-break') && !cs.getPropertyValue('word-break')) {
+          cs.setProperty('word-break', 'normal');
+        }
+        if (canSetProp('overflow-wrap') && !cs.getPropertyValue('overflow-wrap')) {
+          cs.setProperty('overflow-wrap', 'normal');
+        }
+      });
+
+      const allLines = Array.from(preEl.querySelectorAll<HTMLElement>('.line'));
+      if (allLines.length > 1) {
+        const lastLine = allLines[allLines.length - 1];
+        if (!(lastLine.textContent || '').trim() && lastLine.children.length === 0) {
+          const prevNode = lastLine.previousSibling;
+          if (prevNode && prevNode.nodeType === 3 && /^\r?\n$/.test(prevNode.textContent || '')) {
+            prevNode.remove();
+          }
+          lastLine.remove();
+          allLines.pop();
+        }
+      }
+
+      allLines.forEach((lineEl) => {
+        const ls = lineEl.style;
+        if (canSetProp('white-space') && !ls.getPropertyValue('white-space')) {
+          ls.setProperty('white-space', 'pre');
+        }
+        if (canSetProp('text-align') && !ls.getPropertyValue('text-align')) {
+          ls.setProperty('text-align', 'left');
+        }
+        if (canSetProp('word-break') && !ls.getPropertyValue('word-break')) {
+          ls.setProperty('word-break', 'normal');
+        }
+        if (canSetProp('overflow-wrap') && !ls.getPropertyValue('overflow-wrap')) {
+          ls.setProperty('overflow-wrap', 'normal');
+        }
+      });
+    }
+  });
 
   // #1.7 SVG animate/animateTransform/animateMotion begin="touchstart" safeguard
   rootContainer.querySelectorAll('animate[begin], animateTransform[begin], animateMotion[begin]').forEach((el) => {

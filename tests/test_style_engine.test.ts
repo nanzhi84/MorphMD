@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { fromHtml } from 'hast-util-from-html';
+import { AssetStore } from '../src/core/assets';
+import { buildDeliverySnapshot } from '../src/core/snapshot';
 import { analyzeStyles, DEFAULT_DESIGN_TOKENS, getDefaultCapabilities, inlineStyles, MORPH_TOKEN_KEYS, serializeTokensToCss } from '../src/core/style';
+import { THEME_PRESETS } from '../src/ui/presets';
 import { documentOf, evidence } from './support/contracts';
 
 const content = '<div class="morph-doc"><h2 class="morph-h2">Heading</h2><p class="morph-p">Body <em>child</em></p><pre class="morph-code"><code>const n = 1;</code></pre></div>';
@@ -170,5 +174,65 @@ describe('TestStyleCapabilityGuard', () => {
   it('test_token_only_native_style_change_emits_target_diagnostic', () => {
     const result = inlineStyles(content, { capabilities: getDefaultCapabilities('x-article'), tokens: { '--morph-ink': 'red' } });
     expect(result.diagnostics.some(d => d.targetId === 'x-article')).toBe(true);
+  });
+
+  it('test_wechat_callout_normalizes_to_native_paragraph_with_inline_phrasing_children_and_survives_html5_reparse', async () => {
+    const store = new AssetStore();
+    const markdown = [
+      '# 标题',
+      '',
+      '> [!TIP] 样式内联提示',
+      '> 微信公众号不支持外部样式表，所有样式必须内联到标签上。',
+      '>',
+      '> 第二段提示内容。',
+    ].join('\n');
+
+    const snapshot = await buildDeliverySnapshot(markdown, 'wechat', store, {
+      customCss: THEME_PRESETS.default.presetCss,
+      tokens: THEME_PRESETS.default.tokens,
+    });
+
+    const reparsed = documentOf(snapshot.html);
+    const callout = reparsed.querySelector<HTMLElement>('.morph-callout');
+    expect(callout).not.toBeNull();
+    expect(callout!.tagName.toLowerCase()).toBe('p');
+    expect(callout!.querySelectorAll('p, div, section')).toHaveLength(0);
+    const hastTree = fromHtml(snapshot.html, { fragment: true });
+    expect(JSON.stringify(hastTree)).toContain('"tagName":"p"');
+
+    expect(callout!.style.backgroundColor).toBeTruthy();
+    expect(callout!.style.borderLeft || callout!.style.borderLeftWidth).toContain('3px');
+    expect(callout!.style.borderRadius).toBe('0px 8px 8px 0px');
+    expect(callout!.style.padding || callout!.style.paddingTop).toBeTruthy();
+    expect(callout!.style.marginTop).toBe('0px');
+    expect(callout!.style.marginBottom).toBe('16px');
+    expect(callout!.style.fontFamily).toBeTruthy();
+    expect(callout!.style.fontSize).toBe('14.5px');
+    expect(callout!.style.lineHeight).toBe('1.65');
+    expect(callout!.style.color).toBeTruthy();
+
+    const title = reparsed.querySelector<HTMLElement>('.morph-callout-title');
+    const body = reparsed.querySelector<HTMLElement>('.morph-callout-body');
+    expect(title).not.toBeNull();
+    expect(body).not.toBeNull();
+    expect(callout!.contains(title!)).toBe(true);
+    expect(callout!.contains(body!)).toBe(true);
+    expect(title!.tagName.toLowerCase()).toBe('span');
+    expect(body!.tagName.toLowerCase()).toBe('span');
+    expect(title!.nextElementSibling?.tagName.toLowerCase()).toBe('br');
+
+    const titleText = title!.querySelector<HTMLElement>('.morph-callout-title-text');
+    expect(titleText).not.toBeNull();
+    expect(titleText!.tagName.toLowerCase()).toBe('span');
+    expect(titleText!.style.fontWeight).toBe('600');
+    expect(titleText!.style.color).toBeTruthy();
+    expect(titleText!.style.fontSize).toBeTruthy();
+    expect(titleText!.style.fontFamily).toBeTruthy();
+
+    const bodyParas = Array.from(callout!.querySelectorAll<HTMLElement>('.morph-p'));
+    expect(bodyParas).toHaveLength(2);
+    for (const bp of bodyParas) {
+      expect(bp.tagName.toLowerCase()).toBe('span');
+    }
   });
 });
