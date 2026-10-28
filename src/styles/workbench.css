@@ -257,14 +257,14 @@ body,
 }
 
 .morph-editor-pane {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 260px;
-  max-width: 720px;
+  max-width: 640px;
 }
 
 .morph-preview-pane {
-  flex: 1 1 320px;
-  min-width: 300px;
+  flex: 1 1 560px;
+  min-width: 520px;
 }
 
 .morph-col-resizer {
@@ -446,6 +446,8 @@ body,
   padding: 5px 10px;
   border-radius: 6px;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .morph-subtab.is-active {
@@ -510,9 +512,9 @@ body,
   transition: max-width 0.18s ease;
 }
 
-/* 微信公众号视图：对齐公众号后台编辑器 585px 正文宽度 (720px - 2px - 2*66.5px = 585px) 并禁用垂直外边距折叠 */
+/* 微信公众号视图：对齐公众号后台编辑器 585px 正文宽度，窄屏下自适应内边距防止挤压变形 */
 .morph-preview-stage[data-target-view="wechat"] {
-  padding: 36px 66.5px;
+  padding: 36px clamp(24px, 6%, 66.5px);
 }
 
 .morph-preview-stage[data-target-view="wechat"][style*="375px"] {
@@ -716,9 +718,9 @@ body,
 
 /* Right Column: Style Settings Drawer */
 .morph-style-drawer {
-  flex: 0 0 auto;
-  min-width: 330px;
-  max-width: 660px;
+  flex: 0 1 auto;
+  min-width: 270px;
+  max-width: 560px;
   display: flex;
   flex-direction: column;
   background-color: var(--ui-bg-surface);
@@ -1289,11 +1291,11 @@ body,
 }
 
 .morph-guide-markdown-doc h1 {
-  margin: 0 0 6px;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--ui-ink);
-  letter-spacing: -0.01em;
+  display: none;
+}
+
+.morph-guide-markdown-doc h2:first-of-type {
+  margin-top: 2px;
 }
 
 .morph-guide-markdown-doc h2 {

@@ -279,8 +279,8 @@ export const App: React.FC<AppProps> = ({
   const [copyFeedback, setCopyFeedback] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [assetTick, setAssetTick] = useState<number>(0);
-  const [editorWidth, setEditorWidth] = useState<number>(390);
-  const [drawerWidth, setDrawerWidth] = useState<number>(444);
+  const [editorWidth, setEditorWidth] = useState<number>(360);
+  const [drawerWidth, setDrawerWidth] = useState<number>(300);
   const [cssGuideOpen, setCssGuideOpen] = useState<boolean>(false);
 
   const appRootRef = useRef<HTMLDivElement | null>(null);
@@ -1018,9 +1018,25 @@ export const App: React.FC<AppProps> = ({
       {/* 1. Top Global Header */}
       <header className="morph-header" data-testid="workbench-header">
         <div className="morph-brand">
-          <span className="morph-logo-badge" aria-hidden="true">
-            M
-          </span>
+          <a
+            href="#top"
+            className="morph-logo-badge"
+            title="返回公开页 (Landing Page)"
+            aria-label="返回 MorphMD 公开页"
+            onClick={() => {
+              if (typeof document !== 'undefined') {
+                document.documentElement.setAttribute('data-surface', 'landing');
+              }
+            }}
+          >
+            <img
+              src="images/logo.svg"
+              alt=""
+              width={28}
+              height={28}
+              style={{ display: 'block', width: '100%', height: '100%', borderRadius: '6px' }}
+            />
+          </a>
           <div className="morph-brand-text">
             <div className="morph-brand-row">
               <h1 className="morph-brand-title" data-testid="brand-title">

@@ -1,18 +1,1867 @@
-<!doctype html>
-<html lang="zh-CN">
+<!DOCTYPE html>
+<html lang="zh-CN" data-surface="landing">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MorphMD — 一源多态 Markdown 编辑器</title>
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      try {
+        document.querySelector('meta[name="color-scheme"]').content =
+          localStorage.getItem('color-scheme') ?? 'light dark';
+      } catch (e) {}
+    </script>
+    <title>MorphMD — 一源多态 · 三端同构的 Markdown 书刊级排版工作台</title>
+    <meta name="description" content="MorphMD 是一套面向多渠道内容创作者的统一 Markdown 排版与编译引擎。一次编写原稿与粘贴图片，实时同构输出微信公众号内联富文本、X Articles 原生语义长文与多比例社交图文卡片。" />
+    <link rel="icon" type="image/svg+xml" href="images/logo.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Noto+Serif+SC:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg-primary: light-dark(#FAF9F5, #141413);
+        --bg-secondary: light-dark(#F5F4EF, #1C1C1A);
+        --bg-surface: light-dark(#FFFFFF, #242421);
+        --bg-elevated: light-dark(#F0EDE4, #2C2C28);
+        --text-primary: light-dark(#141413, #ECECEC);
+        --text-secondary: light-dark(#52514E, #A6A49E);
+        --text-muted: light-dark(#82807A, #73716B);
+        --accent: #D97757;
+        --accent-hover: #C46344;
+        --accent-subtle: light-dark(rgba(217, 119, 87, 0.11), rgba(217, 119, 87, 0.18));
+        --yoryon-slate: #4A6B82;
+        --yoryon-subtle: light-dark(rgba(74, 107, 130, 0.11), rgba(74, 107, 130, 0.22));
+        --ink-charcoal: #2D2D2A;
+        --border-color: light-dark(#E5E2D9, #2E2E2B);
+        --border-strong: light-dark(#D4CFC3, #3E3E3A);
+        --shadow-sm: light-dark(
+          0 2px 8px rgba(20, 20, 19, 0.04),
+          0 2px 8px rgba(0, 0, 0, 0.28)
+        );
+        --shadow-md: light-dark(
+          0 12px 32px rgba(20, 20, 19, 0.07),
+          0 12px 32px rgba(0, 0, 0, 0.42)
+        );
+        --shadow-lg: light-dark(
+          0 24px 64px rgba(20, 20, 19, 0.11),
+          0 24px 64px rgba(0, 0, 0, 0.58)
+        );
+        --font-serif: 'Newsreader', 'Noto Serif SC', Georgia, serif;
+        --font-sans: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+        --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      :root:has(> head > meta[name="color-scheme"][content="dark"]) {
+        color-scheme: dark;
+      }
+
+      :root:has(> head > meta[name="color-scheme"][content="light"]) {
+        color-scheme: light;
+      }
+
+      html[data-surface="landing"] #root {
+        display: none;
+      }
+
+      html[data-surface="workbench"] #morph-landing-page {
+        display: none;
+      }
+
+      html[data-surface="workbench"] #root {
+        display: block;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      html[lang="zh-CN"] [data-lang="en"] {
+        display: none !important;
+      }
+
+      html[lang="en"] [data-lang="zh"] {
+        display: none !important;
+      }
+
+      #morph-landing-page {
+        background-color: var(--bg-primary);
+        color: var(--text-primary);
+        font-family: var(--font-sans);
+        line-height: 1.65;
+        min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      #morph-landing-page *,
+      #morph-landing-page *::before,
+      #morph-landing-page *::after {
+        box-sizing: border-box;
+      }
+
+      #morph-landing-page a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .landing-container {
+        width: 100%;
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 0 28px;
+      }
+
+      /* ==========================================================================
+         1. Studio Top Header Bar
+         ========================================================================== */
+      header.site-header {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .header-inner {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 14px 28px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+
+      .brand-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 11px;
+        font-family: var(--font-serif);
+        font-weight: 600;
+        font-size: 1.2rem;
+        letter-spacing: -0.02em;
+        color: var(--text-primary);
+      }
+
+      .brand-link img {
+        width: 30px;
+        height: 30px;
+        border-radius: 7px;
+        display: block;
+      }
+
+      .brand-edition-tag {
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        font-weight: 500;
+        color: var(--text-secondary);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        padding: 2px 7px;
+        border-radius: 4px;
+        letter-spacing: 0.01em;
+      }
+
+      .header-sections-nav {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        font-size: 0.88rem;
+        font-weight: 500;
+        color: var(--text-secondary);
+      }
+
+      .header-sections-nav a {
+        transition: color 0.15s ease;
+      }
+
+      .header-sections-nav a:hover {
+        color: var(--text-primary);
+      }
+
+      .header-controls {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .nav-text-btn {
+        appearance: none;
+        border: 1px solid var(--border-color);
+        background: var(--bg-surface);
+        color: var(--text-secondary);
+        font-family: var(--font-sans);
+        font-size: 0.82rem;
+        font-weight: 500;
+        padding: 6px 11px;
+        border-radius: 7px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+      }
+
+      .nav-text-btn:hover {
+        color: var(--text-primary);
+        border-color: var(--border-strong);
+        background: var(--bg-secondary);
+      }
+
+      .nav-text-btn svg {
+        width: 15px;
+        height: 15px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.8;
+      }
+
+      .header-workbench-cta {
+        appearance: none;
+        border: 1px solid var(--text-primary);
+        background: var(--text-primary);
+        color: var(--bg-primary);
+        font-family: var(--font-sans);
+        font-size: 0.82rem;
+        font-weight: 600;
+        padding: 6px 13px;
+        border-radius: 7px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        transition: opacity 0.15s ease, transform 0.15s ease;
+      }
+
+      .header-workbench-cta:hover {
+        opacity: 0.9;
+        transform: translateY(-1px);
+      }
+
+      /* ==========================================================================
+         2. Editorial Hero Section + Widescreen 16:10 Studio Showcase
+         ========================================================================== */
+      .hero-section {
+        padding: 56px 0 64px;
+      }
+
+      .hero-editorial-header {
+        max-width: 860px;
+        margin: 0 auto 40px;
+        text-align: center;
+      }
+
+      .hero-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 14px;
+        border-radius: 999px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        font-family: var(--font-mono);
+        font-size: 0.76rem;
+        font-weight: 500;
+        letter-spacing: 0.03em;
+        margin-bottom: 22px;
+      }
+
+      .hero-kicker-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+
+      .hero-title {
+        font-family: var(--font-serif);
+        font-size: clamp(2.35rem, 4.6vw, 3.7rem);
+        font-weight: 600;
+        line-height: 1.18;
+        letter-spacing: -0.025em;
+        margin: 0 0 20px;
+        color: var(--text-primary);
+      }
+
+      .hero-title-highlight {
+        color: var(--accent);
+      }
+
+      .hero-subtitle {
+        max-width: 700px;
+        margin: 0 auto 28px;
+        font-size: 1.06rem;
+        line-height: 1.78;
+        color: var(--text-secondary);
+      }
+
+      .hero-subtitle code {
+        font-family: var(--font-mono);
+        font-size: 0.88em;
+        padding: 2px 7px;
+        border-radius: 5px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        white-space: nowrap;
+      }
+
+      .hero-ctas {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .btn-primary {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 24px;
+        border-radius: 9px;
+        background: var(--accent);
+        color: #FFFFFF !important;
+        font-weight: 600;
+        font-size: 0.95rem;
+        border: 1px solid var(--accent);
+        box-shadow: 0 4px 14px rgba(217, 119, 87, 0.25);
+        cursor: pointer;
+        transition: background-color 0.16s ease, transform 0.16s ease;
+      }
+
+      .btn-primary:hover {
+        background: var(--accent-hover);
+        transform: translateY(-1px);
+      }
+
+      .btn-secondary {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 20px;
+        border-radius: 9px;
+        background: var(--bg-surface);
+        color: var(--text-primary);
+        font-weight: 500;
+        font-size: 0.95rem;
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow-sm);
+        cursor: pointer;
+        transition: border-color 0.16s ease, background-color 0.16s ease, transform 0.16s ease;
+      }
+
+      .btn-secondary:hover {
+        border-color: var(--border-strong);
+        background: var(--bg-secondary);
+        transform: translateY(-1px);
+      }
+
+      .btn-primary svg,
+      .btn-secondary svg {
+        width: 17px;
+        height: 17px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 2;
+      }
+
+      /* Widescreen 16:10 Studio Frame (Zero Distortion) */
+      .hero-showcase {
+        max-width: 1080px;
+        margin: 0 auto;
+        border-radius: 14px;
+        overflow: hidden;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-strong);
+        box-shadow: var(--shadow-lg);
+      }
+
+      .window-titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 16px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .window-dots {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .window-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+
+      .window-dot.close {
+        background: #E56B55;
+      }
+
+      .window-dot.minimize {
+        background: #E2B34B;
+      }
+
+      .window-dot.expand {
+        background: #58B368;
+      }
+
+      .window-title {
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+      }
+
+      .window-preset-pills {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+      }
+
+      .preset-pill-terracotta {
+        padding: 2px 7px;
+        border-radius: 4px;
+        background: var(--accent-subtle);
+        color: var(--accent);
+        font-weight: 500;
+      }
+
+      .preset-pill-slate {
+        padding: 2px 7px;
+        border-radius: 4px;
+        background: var(--yoryon-subtle);
+        color: var(--yoryon-slate);
+        font-weight: 500;
+      }
+
+      .showcase-video {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 16 / 10;
+        display: block;
+        background: #F7F7F5;
+      }
+
+      /* ==========================================================================
+         3. Side-by-Side "One Source -> Three Targets" Interactive Compiler Studio
+         ========================================================================== */
+      .isomorphic-studio-section {
+        padding: 64px 0;
+        border-top: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--bg-secondary) 55%, var(--bg-primary));
+      }
+
+      .section-header {
+        max-width: 840px;
+        margin: 0 auto 40px;
+        text-align: center;
+        text-wrap: balance;
+      }
+
+      .section-kicker {
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin-bottom: 10px;
+      }
+
+      .section-header h2 {
+        font-family: var(--font-serif);
+        font-size: clamp(1.75rem, 3.2vw, 2.35rem);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        margin: 0 0 12px;
+        color: var(--text-primary);
+      }
+
+      .section-header p {
+        margin: 0;
+        font-size: 1rem;
+        color: var(--text-secondary);
+      }
+
+      .studio-split-grid {
+        display: grid;
+        grid-template-columns: 5fr 7fr;
+        gap: 22px;
+        align-items: stretch;
+      }
+
+      .studio-source-pane,
+      .studio-target-pane {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .studio-pane-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 11px 16px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-color);
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+      }
+
+      .studio-file-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-family: var(--font-mono);
+        color: var(--text-primary);
+      }
+
+      .studio-file-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #2E8B57;
+      }
+
+      .studio-source-code {
+        margin: 0;
+        padding: 18px 20px;
+        font-family: var(--font-mono);
+        font-size: 0.81rem;
+        line-height: 1.72;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+        flex: 1;
+      }
+
+      .studio-source-code .md-h {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      .studio-source-code .md-em {
+        color: var(--yoryon-slate);
+      }
+
+      .studio-source-code .md-link {
+        color: var(--accent);
+      }
+
+      .studio-source-code .md-muted {
+        color: var(--text-muted);
+      }
+
+      .preview-mode-tabs {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: var(--bg-primary);
+        padding: 3px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+      }
+
+      .preview-mode-btn {
+        appearance: none;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-family: var(--font-sans);
+        font-size: 0.78rem;
+        font-weight: 500;
+        padding: 5px 11px;
+        border-radius: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.14s ease;
+      }
+
+      .preview-mode-btn.active {
+        background: var(--accent);
+        color: #FFFFFF;
+        font-weight: 600;
+      }
+
+      .studio-target-body {
+        padding: 22px 24px;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .preview-target-output {
+        display: none;
+      }
+
+      .preview-target-output.active {
+        display: block;
+      }
+
+      .rendered-paper-mock {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 20px 24px;
+      }
+
+      .rendered-paper-mock h4 {
+        font-family: var(--font-serif);
+        font-size: 1.25rem;
+        margin: 0 0 10px;
+        color: var(--text-primary);
+      }
+
+      .rendered-paper-mock p {
+        margin: 0 0 12px;
+        font-size: 0.92rem;
+        line-height: 1.75;
+        color: var(--text-primary);
+      }
+
+      .rendered-paper-mock .mock-kaiti {
+        font-family: 'Kaiti SC', 'STKaiti', 'KaiTi', serif;
+        color: var(--text-secondary);
+      }
+
+      .rendered-paper-mock .mock-link-text {
+        color: var(--accent);
+        font-weight: 500;
+      }
+
+      .rendered-paper-mock .mock-link-url {
+        font-family: var(--font-mono);
+        font-size: 0.84em;
+        color: var(--text-muted);
+      }
+
+      .rendered-paper-mock .mock-quote {
+        margin: 12px 0 0;
+        padding: 4px 0 4px 12px;
+        border-left: 3px solid var(--accent);
+        font-family: var(--font-serif);
+        color: var(--text-secondary);
+        font-size: 0.88rem;
+      }
+
+      .mock-raster-table {
+        margin-top: 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 7px;
+        overflow: hidden;
+        font-size: 0.8rem;
+      }
+
+      .mock-raster-row {
+        display: grid;
+        grid-template-columns: 1.1fr 1.4fr 1.3fr;
+        padding: 7px 12px;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .mock-raster-row:last-child {
+        border-bottom: none;
+      }
+
+      .mock-raster-row.head {
+        background: var(--bg-secondary);
+        font-weight: 600;
+      }
+
+      .target-contract-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding-top: 12px;
+        border-top: 1px dashed var(--border-color);
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+      }
+
+      .contract-pill {
+        padding: 2px 8px;
+        border-radius: 4px;
+        background: var(--accent-subtle);
+        color: var(--accent);
+        font-weight: 500;
+      }
+
+      /* ==========================================================================
+         4. Why MorphMD (Four Architectural Pillars Grid)
+         ========================================================================== */
+      .why-section {
+        padding: 72px 0;
+        border-top: 1px solid var(--border-color);
+      }
+
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 20px;
+      }
+
+      .feature-card {
+        padding: 26px 28px;
+        border-radius: 12px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow-sm);
+        transition: border-color 0.18s ease, transform 0.18s ease;
+      }
+
+      .feature-card:hover {
+        border-color: var(--border-strong);
+        transform: translateY(-2px);
+      }
+
+      .feature-card-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
+      }
+
+      .feature-icon {
+        width: 38px;
+        height: 38px;
+        border-radius: 9px;
+        background: var(--accent-subtle);
+        color: var(--accent);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .feature-icon svg {
+        width: 19px;
+        height: 19px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.9;
+      }
+
+      .feature-tag {
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        color: var(--text-muted);
+      }
+
+      .feature-card h3 {
+        font-family: var(--font-serif);
+        font-size: 1.2rem;
+        font-weight: 600;
+        margin: 0 0 8px;
+        color: var(--text-primary);
+      }
+
+      .feature-card p {
+        margin: 0;
+        font-size: 0.92rem;
+        line-height: 1.68;
+        color: var(--text-secondary);
+      }
+
+      /* ==========================================================================
+         5. Deep-Dive Engineering Walkthrough (4 Single-Layer Rows)
+         ========================================================================== */
+      .walkthrough-section {
+        padding: 72px 0;
+        border-top: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--bg-secondary) 45%, var(--bg-primary));
+      }
+
+      .walkthrough-list {
+        display: flex;
+        flex-direction: column;
+        gap: 52px;
+      }
+
+      .walkthrough-row {
+        display: grid;
+        grid-template-columns: 5fr 7fr;
+        gap: 40px;
+        align-items: center;
+      }
+
+      .walkthrough-row.reverse {
+        grid-template-columns: 7fr 5fr;
+      }
+
+      .walkthrough-row.reverse .walkthrough-text {
+        order: 2;
+      }
+
+      .walkthrough-row.reverse .walkthrough-visual {
+        order: 1;
+      }
+
+      .walkthrough-num {
+        display: inline-block;
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--accent);
+        padding: 3px 9px;
+        border-radius: 5px;
+        background: var(--accent-subtle);
+        margin-bottom: 12px;
+      }
+
+      .walkthrough-text h3 {
+        font-family: var(--font-serif);
+        font-size: 1.48rem;
+        font-weight: 600;
+        line-height: 1.3;
+        margin: 0 0 12px;
+        color: var(--text-primary);
+      }
+
+      .walkthrough-text p {
+        margin: 0 0 16px;
+        font-size: 0.95rem;
+        line-height: 1.74;
+        color: var(--text-secondary);
+      }
+
+      .walkthrough-Visual-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .walkthrough-Visual-tags span {
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        padding: 3px 9px;
+        border-radius: 5px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+      }
+
+      .walkthrough-visual {
+        width: 100%;
+      }
+
+      .wt-spec-card {
+        border-radius: 12px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow-md);
+        overflow: hidden;
+      }
+
+      .wt-spec-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 16px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-color);
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+      }
+
+      .wt-spec-body {
+        padding: 20px 22px;
+        font-size: 0.86rem;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .wt-code-line {
+        padding: 10px 14px;
+        border-radius: 8px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        font-family: var(--font-mono);
+        font-size: 0.79rem;
+        line-height: 1.6;
+        color: var(--text-primary);
+      }
+
+      .wt-preset-duo {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .wt-preset-box {
+        padding: 14px 16px;
+        border-radius: 9px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-primary);
+      }
+
+      .wt-preset-box h5 {
+        margin: 0 0 6px;
+        font-size: 0.88rem;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .wt-preset-box p {
+        margin: 0;
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+        line-height: 1.55;
+      }
+
+      /* ==========================================================================
+         6. Quick Start Section (#install-guide) & Clean Studio Footer
+         ========================================================================== */
+      .install-guide-section {
+        padding: 72px 0;
+        border-top: 1px solid var(--border-color);
+      }
+
+      .install-steps-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+      }
+
+      .install-step-card {
+        padding: 26px;
+        border-radius: 12px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .step-badge {
+        width: 30px;
+        height: 30px;
+        border-radius: 7px;
+        background: var(--accent-subtle);
+        color: var(--accent);
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .install-step-card h3 {
+        font-family: var(--font-serif);
+        font-size: 1.15rem;
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .install-step-card p {
+        margin: 0;
+        font-size: 0.88rem;
+        color: var(--text-secondary);
+        line-height: 1.65;
+      }
+
+      .install-code-snippet {
+        margin-top: auto;
+        padding: 10px 12px;
+        border-radius: 7px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        font-family: var(--font-mono);
+        font-size: 0.74rem;
+        line-height: 1.55;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow-x: auto;
+      }
+
+      .install-bottom-cta {
+        margin-top: 32px;
+        display: flex;
+        justify-content: center;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+
+      footer.site-footer {
+        padding: 32px 0 44px;
+        border-top: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        font-size: 0.84rem;
+      }
+
+      .footer-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 16px;
+      }
+
+      .footer-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        font-weight: 500;
+        color: var(--text-primary);
+      }
+
+      .footer-brand img {
+        width: 22px;
+        height: 22px;
+        border-radius: 5px;
+      }
+
+      .footer-links {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+      }
+
+      .footer-links a:hover {
+        color: var(--text-primary);
+      }
+
+      @media (max-width: 920px) {
+        .header-sections-nav {
+          display: none;
+        }
+        .studio-split-grid,
+        .feature-grid,
+        .walkthrough-row,
+        .walkthrough-row.reverse,
+        .install-steps-grid,
+        .wt-preset-duo {
+          grid-template-columns: 1fr;
+        }
+        .walkthrough-row.reverse .walkthrough-text,
+        .walkthrough-row.reverse .walkthrough-visual {
+          order: unset;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="morph-landing-page">
+      <!-- 1. Studio Top Header -->
+      <header class="site-header" id="top">
+        <div class="header-inner">
+          <a href="#top" class="brand-link" aria-label="MorphMD Home">
+            <img src="images/logo.svg" alt="MorphMD Logo" width="30" height="30" />
+            <span>MorphMD</span>
+            <span class="brand-edition-tag">Editorial Studio</span>
+          </a>
+
+          <nav class="header-sections-nav" aria-label="Page Sections">
+            <a href="#isomorphic-studio">
+              <span data-lang="zh">三端编译沙盒</span>
+              <span data-lang="en">Compiler Sandbox</span>
+            </a>
+            <a href="#why-morphmd">
+              <span data-lang="zh">核心架构</span>
+              <span data-lang="en">Why MorphMD</span>
+            </a>
+            <a href="#walkthrough">
+              <span data-lang="zh">管线剖析</span>
+              <span data-lang="en">Product Walkthrough</span>
+            </a>
+            <a href="#install-guide">
+              <span data-lang="zh">快速开始</span>
+              <span data-lang="en">Quick Start</span>
+            </a>
+          </nav>
+
+          <div class="header-controls">
+            <button
+              type="button"
+              id="lang-toggle-btn"
+              class="nav-text-btn"
+              aria-label="切换语言 / Switch Language"
+            >
+              <span data-lang="zh">EN</span>
+              <span data-lang="en">中文</span>
+            </button>
+            <button
+              type="button"
+              id="theme-toggle-btn"
+              class="nav-text-btn"
+              aria-label="切换浅色或深色主题 / Toggle color scheme"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+              <span data-lang="zh">外观</span>
+              <span data-lang="en">Theme</span>
+            </button>
+            <a
+              href="https://github.com/yoryon/MorphMD"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="nav-text-btn"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+              </svg>
+              <span>GitHub</span>
+            </a>
+            <button type="button" id="header-workbench-btn" class="header-workbench-cta">
+              <span data-lang="zh">进入工作台 →</span>
+              <span data-lang="en">Open Workbench →</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        <!-- 2. Editorial Hero Section + 16:10 Widescreen Showcase -->
+        <section class="hero-section">
+          <div class="landing-container">
+            <div class="hero-editorial-header">
+              <div class="hero-kicker">
+                <span class="hero-kicker-dot" aria-hidden="true"></span>
+                <span data-lang="zh">ONE MARKDOWN · 微信公众号 · X ARTICLES · 多比例图文卡片</span>
+                <span data-lang="en">ONE MARKDOWN · WECHAT · X ARTICLES · SOCIAL CARDS</span>
+              </div>
+
+              <h1 class="hero-title">
+                <span data-lang="zh">
+                  一次编写 Markdown，<br />
+                  <span class="hero-title-highlight">三端书刊级同构交付。</span>
+                </span>
+                <span data-lang="en">
+                  Write Once in Markdown.<br />
+                  <span class="hero-title-highlight">Publish Everywhere with Editorial Craft.</span>
+                </span>
+              </h1>
+
+              <p class="hero-subtitle">
+                <span data-lang="zh">
+                  面向多渠道创作者的统一排版工作台。同一份 Markdown 原稿与剪贴板贴图，实时编译为
+                  <code>微信公众号</code> 内联富文本、<code>X Articles</code> 原生语义长文与
+                  <code>3:4 / 4:5 / 1:1 / 16:9</code> 社交图文卡片，支持局部框选复制与受控 CSS 定制。
+                </span>
+                <span data-lang="en">
+                  A unified editorial workbench for multi-channel creators. Compile one Markdown manuscript and pasted images into
+                  <code>WeChat Official Account</code> inline HTML, <code>X Articles</code> native blocks, and
+                  <code>3:4 / 4:5 / 1:1 / 16:9</code> social cards in real time.
+                </span>
+              </p>
+
+              <div class="hero-ctas">
+                <a href="#workbench" id="launch-workbench-btn" class="btn-primary">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                  <span data-lang="zh">打开在线工作台</span>
+                  <span data-lang="en">Launch Online Workbench</span>
+                </a>
+                <a href="#isomorphic-studio" class="btn-secondary">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                    <line x1="9" y1="3" x2="9" y2="21"></line>
+                  </svg>
+                  <span data-lang="zh">体验一源三态沙盒</span>
+                  <span data-lang="en">Try Interactive Sandbox</span>
+                </a>
+                <a href="#install-guide" class="btn-secondary">
+                  <span data-lang="zh">快速开始指南</span>
+                  <span data-lang="en">Quick Start Guide</span>
+                </a>
+              </div>
+            </div>
+
+            <!-- 16:10 High-Resolution Widescreen Studio Showcase -->
+            <div class="hero-showcase" id="studio-demo">
+              <div class="window-titlebar">
+                <div class="window-dots" aria-hidden="true">
+                  <span class="window-dot close"></span>
+                  <span class="window-dot minimize"></span>
+                  <span class="window-dot expand"></span>
+                </div>
+                <div class="window-title">
+                  <span data-lang="zh">MorphMD Studio — 1440×900 宽屏实机演示（公众号 · X 长文 · 图文卡片 · 双主题预设）</span>
+                  <span data-lang="en">MorphMD Studio — 1440×900 Live Walkthrough (WeChat · X Articles · Social Cards · Dual Presets)</span>
+                </div>
+                <div class="window-preset-pills">
+                  <span class="preset-pill-terracotta">Anthropic 学术出版</span>
+                  <span class="preset-pill-slate">Yoryon 书刊阅读</span>
+                </div>
+              </div>
+              <video
+                class="showcase-video"
+                src="images/demo.mp4"
+                poster="images/demo.gif"
+                autoplay
+                loop
+                muted
+                playsinline
+              ></video>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. Side-by-Side "One Source -> Three Targets" Interactive Compiler Studio -->
+        <section id="isomorphic-studio" class="isomorphic-studio-section hero-interactive-preview">
+          <div class="landing-container">
+            <div class="section-header">
+              <div class="section-kicker">ISOMORPHIC COMPILER SANDBOX</div>
+              <h2>
+                <span data-lang="zh">一源三态：左侧一套原稿，右侧三端实时编译</span>
+                <span data-lang="en">One Manuscript, Three Native Target Outputs</span>
+              </h2>
+              <p>
+                <span data-lang="zh">切换右侧目标平台标签，对比同一段含斜体、外链、公式与表格的 Markdown 在不同载体下的编译策略。</span>
+                <span data-lang="en">Switch target tabs on the right to inspect how the exact same Markdown compiles for each platform.</span>
+              </p>
+            </div>
+
+            <div class="studio-split-grid">
+              <!-- Left Column: Markdown Source -->
+              <div class="studio-source-pane">
+                <div class="studio-pane-bar">
+                  <span class="studio-file-badge">
+                    <span class="studio-file-dot" aria-hidden="true"></span>
+                    <span>article.md · Markdown 唯一事实源</span>
+                  </span>
+                  <span>UTF-8 · AST Ready</span>
+                </div>
+                <pre class="studio-source-code"><span class="md-h"># 让内容自由流动</span>
+
+一份 Markdown，**三种发布形态**。基于 <span class="md-em">*确定性 AST 编译管线*</span> 与受控 `Design Tokens` 样式引擎，<span class="md-link">[MorphMD 跨端排版系统](https://morphmd.dev)</span> 让每一次内容分发都保持视觉与结构同构（信息守恒率 $\eta = 1.0$）。
+
+<span class="md-muted">&gt; 写一次，自由发布。让优秀的内容被更多人看见。</span>
+
+| 发布目标 | 样式传输机制 | 复杂块处理策略 |
+| :--- | :--- | :--- |
+| 微信公众号 | 全量受控内联 style | 公式与 SVG 矢量内联 |
+| X 长文 | 原生语义标签映射 | 表格与公式 2x 光栅化 |</pre>
+              </div>
+
+              <!-- Right Column: Interactive Target Output Switcher -->
+              <div class="studio-target-pane">
+                <div class="studio-pane-bar">
+                  <span>
+                    <span data-lang="zh">编译交付预览 (Delivery Snapshot)</span>
+                    <span data-lang="en">Compiled Delivery Snapshot</span>
+                  </span>
+                  <div class="preview-mode-tabs" role="tablist" aria-label="切换目标视图">
+                    <button
+                      type="button"
+                      id="demo-btn-wechat"
+                      class="preview-mode-btn active"
+                      data-target="wechat"
+                    >
+                      <span data-lang="zh">微信公众号 (wechat)</span>
+                      <span data-lang="en">WeChat HTML</span>
+                    </button>
+                    <button
+                      type="button"
+                      id="demo-btn-x"
+                      class="preview-mode-btn"
+                      data-target="x"
+                    >
+                      <span data-lang="zh">X 长文 (x-article)</span>
+                      <span data-lang="en">X Articles</span>
+                    </button>
+                    <button
+                      type="button"
+                      id="demo-btn-cards"
+                      class="preview-mode-btn"
+                      data-target="cards"
+                    >
+                      <span data-lang="zh">图文卡片 (cards)</span>
+                      <span data-lang="en">Social Cards</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="studio-target-body">
+                  <!-- Output 1: WeChat -->
+                  <div id="demo-output-wechat" class="preview-target-output active">
+                    <div class="rendered-paper-mock">
+                      <h4>让内容自由流动</h4>
+                      <p>
+                        一份 Markdown，<strong>三种发布形态</strong>。基于
+                        <span class="mock-kaiti">确定性 AST 编译管线</span> 与受控
+                        <code>Design Tokens</code> 样式引擎，
+                        <span class="mock-link-text">MorphMD 跨端排版系统</span>
+                        <span class="mock-link-url">(https://morphmd.dev)</span>
+                        让每一次内容分发都保持视觉与结构同构（信息守恒率 η = 1.0）。
+                      </p>
+                      <div class="mock-quote">写一次，自由发布。让优秀的内容被更多人看见。</div>
+                    </div>
+                    <div class="target-contract-meta">
+                      <span>
+                        <span data-lang="zh">✓ 楷体语义强调 · 外链自动展开为次级灰等宽 URL · 引用块零双竖线伪影</span>
+                        <span data-lang="en">✓ KaiTi emphasis · External URL expanded in muted monospace · Clean quote block</span>
+                      </span>
+                      <span class="contract-pill">585px Inline DOM</span>
+                    </div>
+                  </div>
+
+                  <!-- Output 2: X Articles -->
+                  <div id="demo-output-x" class="preview-target-output">
+                    <div class="rendered-paper-mock">
+                      <h4>让内容自由流动</h4>
+                      <p>
+                        一份 Markdown，<strong>三种发布形态</strong>。外链保留原生可点击锚点，不支持的表格与公式块自动通过浏览器端
+                        Canvas 2D 光栅化为 <strong>2x Retina 高清 PNG 位图</strong>：
+                      </p>
+                      <div class="mock-raster-table" aria-label="2x Retina Rasterized Table Preview">
+                        <div class="mock-raster-row head">
+                          <span>发布目标</span>
+                          <span>样式传输机制</span>
+                          <span>复杂块处理策略</span>
+                        </div>
+                        <div class="mock-raster-row">
+                          <span>微信公众号</span>
+                          <span>全量受控内联 style</span>
+                          <span>公式与 SVG 矢量内联</span>
+                        </div>
+                        <div class="mock-raster-row">
+                          <span>X 长文</span>
+                          <span>原生语义标签映射</span>
+                          <span>表格与公式 2x 光栅化</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="target-contract-meta">
+                      <span>
+                        <span data-lang="zh">✓ 剥离冗余内联样式 · 表格与 LaTeX 公式实时绘制为 2x Retina 成品位图</span>
+                        <span data-lang="en">✓ Semantic tags only · Tables &amp; LaTeX math rasterized to 2x Retina PNG</span>
+                      </span>
+                      <span class="contract-pill">2x Canvas Raster</span>
+                    </div>
+                  </div>
+
+                  <!-- Output 3: Social Cards -->
+                  <div id="demo-output-cards" class="preview-target-output">
+                    <div class="rendered-paper-mock">
+                      <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted);margin-bottom:8px;">
+                        <span>MorphMD</span>
+                        <span>3:4 竖版卡片 · 1440×1920</span>
+                      </div>
+                      <h4>让内容自由流动</h4>
+                      <p>
+                        基于 <strong>Look-back Reflow 回溯分页算法</strong> 对块级节点进行亚像素高度测量，自动避免标题孤行与代码块截断；静态图文卡片内超链接同样自动展开为明文 URL：
+                        <span class="mock-link-text">MorphMD 跨端排版系统</span>
+                        <span class="mock-link-url">(https://morphmd.dev)</span>
+                      </p>
+                      <div style="text-align:right;font-family:var(--font-mono);font-size:0.72rem;color:var(--text-muted);margin-top:8px;">
+                        01 / 03
+                      </div>
+                    </div>
+                    <div class="target-contract-meta">
+                      <span>
+                        <span data-lang="zh">✓ 支持 3:4 / 4:5 / 1:1 / 16:9 四种比例 · 智能切页与 ZIP 批量导出</span>
+                        <span data-lang="en">✓ 3:4, 4:5, 1:1, 16:9 aspect ratios · Smart pagination &amp; ZIP export</span>
+                      </span>
+                      <span class="contract-pill">Multi-Page PNG/ZIP</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. Why MorphMD (Four Architectural Pillars) -->
+        <section id="why-morphmd" class="why-section">
+          <div class="landing-container">
+            <div class="section-header">
+              <div class="section-kicker">WHY MORPHMD</div>
+              <h2>
+                <span data-lang="zh">为什么选择 MorphMD？</span>
+                <span data-lang="en">Why MorphMD?</span>
+              </h2>
+              <p>
+                <span data-lang="zh">针对多平台富文本粘贴痛点与书刊级中文排版细节深度打磨。</span>
+                <span data-lang="en">Engineered specifically for cross-platform rich-text fidelity and Chinese editorial typography.</span>
+              </p>
+            </div>
+
+            <div class="feature-grid">
+              <article class="feature-card">
+                <div class="feature-card-top">
+                  <div class="feature-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                      <polyline points="2 17 12 22 22 17"></polyline>
+                      <polyline points="2 12 12 17 22 12"></polyline>
+                    </svg>
+                  </div>
+                  <span class="feature-tag">AST COMPILER</span>
+                </div>
+                <h3>
+                  <span data-lang="zh">一源三态，同构编译</span>
+                  <span data-lang="en">One Source, Three Native Targets</span>
+                </h3>
+                <p>
+                  <span data-lang="zh">一份 Markdown 原稿同时编译驱动微信公众号、X 长文与社交图文卡片，自动完成样式内联与复杂块降级。</span>
+                  <span data-lang="en">Compile a single Markdown manuscript into WeChat HTML, X Articles, and paginated social cards with automatic block adaptation.</span>
+                </p>
+              </article>
+
+              <article class="feature-card">
+                <div class="feature-card-top">
+                  <div class="feature-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                      <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                      <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
+                  </div>
+                  <span class="feature-tag">ASSET STORE</span>
+                </div>
+                <h3>
+                  <span data-lang="zh">极速贴图，原稿零污染</span>
+                  <span data-lang="en">Zero-Pollution Local AssetStore</span>
+                </h3>
+                <p>
+                  <span data-lang="zh">剪贴板粘贴图片即刻入库生成 morph-asset 短引用，彻底告别冗长 Base64 编码撑爆文档，保持源码清爽。</span>
+                  <span data-lang="en">Pasted screenshots are stored in AssetStore with clean morph-asset:// URIs, never polluting your Markdown with Base64 blobs.</span>
+                </p>
+              </article>
+
+              <article class="feature-card">
+                <div class="feature-card-top">
+                  <div class="feature-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                      <rect x="8" y="2" width="8" height="4" rx="1"></rect>
+                    </svg>
+                  </div>
+                  <span class="feature-tag">SELECTION NORMALIZER</span>
+                </div>
+                <h3>
+                  <span data-lang="zh">全屏与选区，所见即所得</span>
+                  <span data-lang="en">Isomorphic Selection Copy</span>
+                </h3>
+                <p>
+                  <span data-lang="zh">支持全文一键复制或鼠标任意框选局部段落复制，自动向上补齐外层容器标签与内联样式，粘贴即还原。</span>
+                  <span data-lang="en">Copy the full document or drag-select any paragraph; the normalizer reconstructs ancestor tags and inline styles automatically.</span>
+                </p>
+              </article>
+
+              <article class="feature-card">
+                <div class="feature-card-top">
+                  <div class="feature-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <circle cx="13.5" cy="6.5" r=".5"></circle>
+                      <circle cx="17.5" cy="10.5" r=".5"></circle>
+                      <circle cx="8.5" cy="7.5" r=".5"></circle>
+                      <circle cx="6.5" cy="12.5" r=".5"></circle>
+                      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path>
+                    </svg>
+                  </div>
+                  <span class="feature-tag">CSS-TREE ENGINE</span>
+                </div>
+                <h3>
+                  <span data-lang="zh">受控 CSS 与双书刊预设</span>
+                  <span data-lang="en">Controlled CSS &amp; Dual Editorial Presets</span>
+                </h3>
+                <p>
+                  <span data-lang="zh">内置 Anthropic 学术出版与 Yoryon 书刊阅读双预设，支持 CSS-Tree 安全内联与伪元素自动物化。</span>
+                  <span data-lang="en">Ships with Anthropic Academic and Yoryon Editorial presets, backed by CSS-Tree sandboxing and pseudo-element materialization.</span>
+                </p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. Core Pipeline Walkthrough (4 Deep-Dive Rows) -->
+        <section id="walkthrough" class="walkthrough-section">
+          <div class="landing-container">
+            <div class="section-header">
+              <div class="section-kicker">PIPELINE ARCHITECTURE</div>
+              <h2>
+                <span data-lang="zh">核心排版管线深度剖析</span>
+                <span data-lang="en">Product Walkthrough</span>
+              </h2>
+              <p>
+                <span data-lang="zh">从语义色彩解耦、平台受限块光栅化到回溯分页，每一处细节均经真实宿主验证。</span>
+                <span data-lang="en">From semantic color decoupling to 2x Retina rasterization and look-back pagination.</span>
+              </p>
+            </div>
+
+            <div class="walkthrough-list">
+              <!-- Row 01 -->
+              <div class="walkthrough-row">
+                <div class="walkthrough-text">
+                  <span class="walkthrough-num">01 · WECHAT PIPELINE</span>
+                  <h3>
+                    <span data-lang="zh">斜体与外链色彩解耦，彻底消除公众号引用块双线阴影</span>
+                    <span data-lang="en">Typographic Gray Balance &amp; Clean WeChat Inlining</span>
+                  </h3>
+                  <p>
+                    <span data-lang="zh">
+                      将语义强调（<code>&lt;em&gt;</code> 切换为中文楷体 + 西文衬线斜体 <code>#32383F</code>）与超链接（陶土色主文 + 次级灰等宽展开 URL <code>#8C857B</code>）彻底解耦；同时将单段引用规整为无块级后代的原生标签，消除微信后台自带的灰色双竖线伪影。
+                    </span>
+                    <span data-lang="en">
+                      Decouples semantic emphasis (KaiTi serif in neutral dark gray) from external links (terracotta anchor + muted monospace URL), while normalizing quotes to prevent WeChat's duplicate border artifact.
+                    </span>
+                  </p>
+                  <div class="walkthrough-Visual-tags">
+                    <span>KaiTi Italic Stack</span>
+                    <span>Muted Monospace URL</span>
+                    <span>585px BFC Isomorphism</span>
+                  </div>
+                </div>
+                <div class="walkthrough-visual">
+                  <div class="wt-spec-card">
+                    <div class="wt-spec-header">
+                      <span>wechat/normalizer.ts · Inline Style &amp; Link Expansion</span>
+                      <span>PASS</span>
+                    </div>
+                    <div class="wt-spec-body">
+                      <div class="wt-code-line">
+                        &lt;em style="font-family: 'LXGW WenKai', 'Kaiti SC', serif; font-style: normal; color: #32383F;"&gt;确定性 AST 编译管线&lt;/em&gt;
+                      </div>
+                      <div class="wt-code-line">
+                        &lt;span class="morph-link-text" style="color: #B85A3A;"&gt;MorphMD 跨端排版系统&lt;span class="link-url" style="color: #8C857B; font-size: 0.85em;"&gt; (https://morphmd.dev)&lt;/span&gt;&lt;/span&gt;
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Row 02 -->
+              <div class="walkthrough-row reverse">
+                <div class="walkthrough-text">
+                  <span class="walkthrough-num">02 · X ARTICLES RASTERIZER</span>
+                  <h3>
+                    <span data-lang="zh">X 长文原生语义映射与 2x Retina 表格/公式光栅化</span>
+                    <span data-lang="en">X Articles Native Semantics &amp; 2x Retina Rasterization</span>
+                  </h3>
+                  <p>
+                    <span data-lang="zh">
+                      X Articles 富文本编辑器会自动剥离不支持的 <code>&lt;table&gt;</code> 与复杂内联 SVG。MorphMD 在预览舞台中通过浏览器高分屏 Canvas 2D 直接将表格与 MathJax 矢量路径绘制为 2x Retina 高清 PNG 成品图，所见即所得。
+                    </span>
+                    <span data-lang="en">
+                      Since X Articles strips native tables and inline SVGs, MorphMD renders tables and MathJax vector paths directly onto 2x Retina HTML5 Canvas bitmaps in the preview stage.
+                    </span>
+                  </p>
+                  <div class="walkthrough-Visual-tags">
+                    <span>2x Retina Canvas 2D</span>
+                    <span>MathJax Path2D Raster</span>
+                    <span>Clean Semantic HTML</span>
+                  </div>
+                </div>
+                <div class="walkthrough-visual">
+                  <div class="wt-spec-card">
+                    <div class="wt-spec-header">
+                      <span>x-article/normalizer.ts · Retina Bitmap Pipeline</span>
+                      <span>2x DPI</span>
+                    </div>
+                    <div class="wt-spec-body">
+                      <div class="wt-code-line">
+                        &lt;img src="data:image/png;base64,iVBORw0KGgo..." data-raster-type="table" width="620" alt="Rendered Table" /&gt;
+                      </div>
+                      <div class="wt-code-line">
+                        &lt;img src="data:image/png;base64,iVBORw0KGgo..." data-raster-type="math" data-math-display="inline" alt="\eta = 1.0" /&gt;
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Row 03 -->
+              <div class="walkthrough-row">
+                <div class="walkthrough-text">
+                  <span class="walkthrough-num">03 · SOCIAL CARDS PAGINATION</span>
+                  <h3>
+                    <span data-lang="zh">四比例智能流式切页，一键导出高清 PNG 与 ZIP 图包</span>
+                    <span data-lang="en">4 Aspect Ratios with Look-Back Reflow Pagination</span>
+                  </h3>
+                  <p>
+                    <span data-lang="zh">
+                      内置小红书 <code>3:4</code>、Instagram <code>4:5</code>、方形 <code>1:1</code> 与横屏 <code>16:9</code> 四种画布，自动计算安全内边距并避免标题孤行，卡片内超链接自动展开为明文 URL，支持打包下载全部分页图片。
+                    </span>
+                    <span data-lang="en">
+                      Supports 3:4, 4:5, 1:1, and 16:9 aspect ratios with widow/orphan protection, automatic link URL expansion for static cards, and one-click ZIP export.
+                    </span>
+                  </p>
+                  <div class="walkthrough-Visual-tags">
+                    <span>3:4 / 4:5 / 1:1 / 16:9</span>
+                    <span>Orphan Heading Guard</span>
+                    <span>Batch ZIP Export</span>
+                  </div>
+                </div>
+                <div class="walkthrough-visual">
+                  <div class="wt-spec-card">
+                    <div class="wt-spec-header">
+                      <span>cards/paginator.ts · Look-Back Reflow</span>
+                      <span>1440×1920</span>
+                    </div>
+                    <div class="wt-spec-body">
+                      <div class="wt-code-line">
+                        Page 01/03 · Header: "MorphMD" · Blocks: [h1, p, blockquote, h2, ol] · Height: 598px / 640px
+                      </div>
+                      <div class="wt-code-line">
+                        Page 02/03 · Header: "MorphMD" · Blocks: [h2, h3, p, table.morph-table] · Height: 612px / 640px
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Row 04 -->
+              <div class="walkthrough-row reverse">
+                <div class="walkthrough-text">
+                  <span class="walkthrough-num">04 · DUAL EDITORIAL PRESETS</span>
+                  <h3>
+                    <span data-lang="zh">内置 Anthropic 与 Yoryon 双官方预设，支持完整自定义 CSS</span>
+                    <span data-lang="en">Anthropic &amp; Yoryon Presets + Full Custom CSS Engine</span>
+                  </h3>
+                  <p>
+                    <span data-lang="zh">
+                      开箱即享 <strong>Anthropic 学术出版</strong>（暖白纸张 + 陶土红左框线）与 <strong>Yoryon 书刊阅读</strong>（居中大标题 + 雾凇蓝学术三线表）两套精调预设，也可随时新建自定义 CSS 方案并查阅内置竖排编写指南。
+                    </span>
+                    <span data-lang="en">
+                      Choose between Anthropic Academic Publishing (terracotta warm paper) and Yoryon Book Editorial (centered headings + slate-blue three-line tables), or write your own custom CSS.
+                    </span>
+                  </p>
+                  <div class="walkthrough-Visual-tags">
+                    <span>Anthropic 学术出版 (#D97757)</span>
+                    <span>Yoryon 书刊阅读 (#4A6B82)</span>
+                    <span>CSS-Tree Sandbox</span>
+                  </div>
+                </div>
+                <div class="walkthrough-visual">
+                  <div class="wt-spec-card">
+                    <div class="wt-spec-header">
+                      <span>ui/presets.ts · Built-in Official Style Presets</span>
+                      <span>2 PRESETS</span>
+                    </div>
+                    <div class="wt-spec-body">
+                      <div class="wt-preset-duo">
+                        <div class="wt-preset-box">
+                          <h5>
+                            <span style="width:10px;height:10px;border-radius:50%;background:#D97757;display:inline-block;"></span>
+                            <span>Anthropic 学术出版</span>
+                          </h5>
+                          <p>暖米白底色、陶土红强调色、无衬线正文搭配楷体语义强调与三线数据表。</p>
+                        </div>
+                        <div class="wt-preset-box">
+                          <h5>
+                            <span style="width:10px;height:10px;border-radius:50%;background:#4A6B82;display:inline-block;"></span>
+                            <span>Yoryon 书刊阅读</span>
+                          </h5>
+                          <p>经典宋/楷书刊衬线正文、居中一级标题、雾凇蓝左框线与高对比代码块。</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6. Quick Start Guide (#install-guide) -->
+        <section id="install-guide" class="install-guide-section">
+          <div class="landing-container">
+            <div class="section-header">
+              <div class="section-kicker">QUICK START</div>
+              <h2>
+                <span data-lang="zh">三步开启跨端排版工作流</span>
+                <span data-lang="en">Quick Start in Three Steps</span>
+              </h2>
+              <p>
+                <span data-lang="zh">既可直接在浏览器中打开在线工作台即刻创作，也可克隆源码在本地运行。</span>
+                <span data-lang="en">Launch the workbench directly in your browser or run from source locally.</span>
+              </p>
+            </div>
+
+            <div class="install-steps-grid">
+              <div class="install-step-card">
+                <span class="step-badge">01</span>
+                <h3>
+                  <span data-lang="zh">克隆仓库或直接在线打开</span>
+                  <span data-lang="en">Clone or Launch Online</span>
+                </h3>
+                <p>
+                  <span data-lang="zh">无需后端服务，所有文稿与图片资产均在本地浏览器内存中安全流转。</span>
+                  <span data-lang="en">Zero backend required; all manuscripts and assets stay locally in your browser.</span>
+                </p>
+                <div class="install-code-snippet">git clone https://github.com/yoryon/MorphMD.git<br />cd MorphMD &amp;&amp; npm install</div>
+              </div>
+
+              <div class="install-step-card">
+                <span class="step-badge">02</span>
+                <h3>
+                  <span data-lang="zh">启动本地开发与构建预览</span>
+                  <span data-lang="en">Start Dev Server &amp; Verify</span>
+                </h3>
+                <p>
+                  <span data-lang="zh">支持毫秒级增量 AST 编译、Shiki 代码高亮与 MathJax 矢量数学公式渲染。</span>
+                  <span data-lang="en">Enjoy sub-50ms incremental AST compilation, Shiki highlighting, and MathJax formulas.</span>
+                </p>
+                <div class="install-code-snippet">npm run dev<br />harness doctor</div>
+              </div>
+
+              <div class="install-step-card">
+                <span class="step-badge">03</span>
+                <h3>
+                  <span data-lang="zh">切换三端视图并一键交付</span>
+                  <span data-lang="en">Switch Targets &amp; Deliver</span>
+                </h3>
+                <p>
+                  <span data-lang="zh">在顶栏切换公众号、X 长文或图文卡片，一键复制富文本或导出高清卡片 ZIP 包。</span>
+                  <span data-lang="en">Switch between WeChat, X Articles, and Social Cards, then copy rich text or export ZIP.</span>
+                </p>
+                <div class="install-code-snippet">Cmd/Ctrl + C (局部框选复制)<br />导出 .md + assets / 导出高清卡片</div>
+              </div>
+            </div>
+
+            <div class="install-bottom-cta">
+              <a href="#workbench" id="footer-workbench-btn" class="btn-primary">
+                <span data-lang="zh">立即进入在线工作台</span>
+                <span data-lang="en">Enter Online Workbench Now</span>
+              </a>
+              <a href="#top" class="btn-secondary">
+                <span data-lang="zh">返回顶部 ↑</span>
+                <span data-lang="en">Back to Top ↑</span>
+              </a>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div class="landing-container footer-inner">
+          <div class="footer-brand">
+            <img src="images/logo.svg" alt="MorphMD Logo" width="22" height="22" />
+            <span>© 2026 MorphMD · Released under the MIT License</span>
+          </div>
+          <div class="footer-links">
+            <a href="#workbench">
+              <span data-lang="zh">在线工作台</span>
+              <span data-lang="en">Workbench</span>
+            </a>
+            <a href="#isomorphic-studio">
+              <span data-lang="zh">三端沙盒</span>
+              <span data-lang="en">Sandbox</span>
+            </a>
+            <a href="https://github.com/yoryon/MorphMD" target="_blank" rel="noopener noreferrer">
+              GitHub
+            </a>
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <!-- Live React Workbench Mount Point -->
     <div id="root"></div>
+
+    <script>
+      (function () {
+        const htmlEl = document.documentElement;
+        const metaScheme = document.querySelector('meta[name="color-scheme"]');
+
+        function syncSurfaceFromLocation() {
+          const hash = window.location.hash;
+          const params = new URLSearchParams(window.location.search);
+          if (hash === '#workbench' || params.get('view') === 'workbench') {
+            htmlEl.setAttribute('data-surface', 'workbench');
+          } else {
+            htmlEl.setAttribute('data-surface', 'landing');
+          }
+        }
+
+        syncSurfaceFromLocation();
+        window.addEventListener('hashchange', syncSurfaceFromLocation);
+
+        ['launch-workbench-btn', 'header-workbench-btn', 'footer-workbench-btn'].forEach(
+          function (id) {
+            const btn = document.getElementById(id);
+            if (btn) {
+              btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                window.location.hash = 'workbench';
+                htmlEl.setAttribute('data-surface', 'workbench');
+                window.scrollTo(0, 0);
+              });
+            }
+          }
+        );
+
+        // Bilingual toggle
+        const langBtn = document.getElementById('lang-toggle-btn');
+        if (langBtn) {
+          langBtn.addEventListener('click', function () {
+            const current = htmlEl.getAttribute('lang') === 'en' ? 'en' : 'zh-CN';
+            htmlEl.setAttribute('lang', current === 'en' ? 'zh-CN' : 'en');
+          });
+        }
+
+        // Theme toggle synced with <meta name="color-scheme">
+        const themeBtn = document.getElementById('theme-toggle-btn');
+        if (themeBtn && metaScheme) {
+          themeBtn.addEventListener('click', function () {
+            const sysDark =
+              window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const currentContent = metaScheme.getAttribute('content') || 'light dark';
+            const renderedDark =
+              currentContent === 'dark' || (currentContent === 'light dark' && sysDark);
+            const target = renderedDark ? 'light' : 'dark';
+            const sysScheme = sysDark ? 'dark' : 'light';
+            if (target === sysScheme) {
+              try {
+                localStorage.removeItem('color-scheme');
+              } catch (e) {}
+              metaScheme.setAttribute('content', 'light dark');
+            } else {
+              try {
+                localStorage.setItem('color-scheme', target);
+              } catch (e) {}
+              metaScheme.setAttribute('content', target);
+            }
+          });
+        }
+
+        // Interactive 3-Target Compiler Sandbox Switcher
+        const modeBtns = [
+          { btn: document.getElementById('demo-btn-wechat'), out: document.getElementById('demo-output-wechat') },
+          { btn: document.getElementById('demo-btn-x'), out: document.getElementById('demo-output-x') },
+          { btn: document.getElementById('demo-btn-cards'), out: document.getElementById('demo-output-cards') },
+        ];
+        modeBtns.forEach(function (item) {
+          if (!item.btn || !item.out) return;
+          item.btn.addEventListener('click', function () {
+            modeBtns.forEach(function (other) {
+              if (other.btn) other.btn.classList.remove('active');
+              if (other.out) other.out.classList.remove('active');
+            });
+            item.btn.classList.add('active');
+            item.out.classList.add('active');
+          });
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

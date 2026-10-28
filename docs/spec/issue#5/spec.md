@@ -102,6 +102,24 @@
 2. **《自定义 CSS 编写指南》弹窗改为标准竖向 Markdown 文档排版**：
    - 移除原有的多列横向选择器网格卡片（`.morph-guide-selector-grid`、`.morph-guide-token-list`），将指南内容抽离为独立的标准竖向 Markdown 文件 [`src/ui/custom-css-guide.md`](../../../src/ui/custom-css-guide.md)，并在弹窗（`data-testid="css-guide-modal"`）中通过 `compileMarkdownSync` 直接渲染为单栏纵向技术文档流。
 
+### 2.7 品牌门面（`README.md` & `images/`）、工作台预览防变形布局与书刊级公开着陆页（`index.html`）
+
+1. **工作台三栏弹性防挤压与品牌实机演示资产（`src/App.tsx`、`src/styles/workbench.css`、`images/logo.svg`、`images/demo.mp4`、`images/demo.gif`）**：
+   - **工作台预览舞台防挤压变形**：在 [`src/App.tsx`](../../../src/App.tsx) 与 [`src/styles/workbench.css`](../../../src/styles/workbench.css) 中优化默认栏宽（编辑区 `360px`、右侧样式抽屉 `300px`），赋予中间预览区（`.morph-preview-pane`）主优占宽度（`flex: 1 1 560px; min-width: 520px;`），两侧栏允许随窄视口弹性收缩（`flex: 0 1 auto`）；所有工具栏按钮与子标签（`.morph-subtab`、`.morph-target-tab`）强制 `white-space: nowrap; flex-shrink: 0;` 杜绝竖向折行；公众号画布内边距采用自适应 `padding: 36px clamp(24px, 6%, 66.5px);`，图文卡片采用安全居中布局杜绝左右裁切；
+   - **`images/logo.svg`**：采用 Claude 暖纸 Squircle 底座（`#FAF9F5` → `#EAE2D2`）、深炭墨色线条（`#141413`）与 Anthropic 赤陶色星芒点缀（`#D97757`），呈现左侧 Markdown 原稿通过星芒转化为三端发布形态（公众号、X 长文、图文卡片）的矢量品牌标志；
+   - **`images/demo.mp4` 与 `images/demo.gif`**：在 `1440×900`（`16:10` 宽屏高分比）视口下基于真实浏览器录制：先以舒展的双栏布局（编辑区 + 宽幅预览舞台）依次演示「微信公众号」585px 书刊排版、「X 长文」2x Retina 表格与公式光栅化、「图文卡片」3:4 完整无裁切卡片切页，随后按需展开右侧「样式设置」抽屉切换「Anthropic 学术出版」与「Yoryon 书刊阅读」预设并展示自定义 CSS 编写指南，画面比例端正、零挤压变形。
+2. **`README.md` 门面重构（借鉴 `Glint` 门面组织模式并与 `AGENTS.md` 约定对齐）**：
+   - 顶部 `<div align="center">` 居中展示 `images/logo.svg`、`# MorphMD`、核心定位副标题、架构亮点简介、Shields.io 徽章组以及指向 `images/demo.mp4` 的无拉伸 `images/demo.gif` 宽屏演示画框；
+   - 正文保持 `## Core ideas`（核心理念列表 + 三端目标与交互能力矩阵表）、`## Get started`（三步快速启动与使用指南）、`## Learn more`（工程规范、架构现状、ADR 与变更记录导航）三段式结构，严禁混入外部仓库作者残留标识。
+3. **书刊出版工作室风公开着陆页（`index.html`）与工作台无缝切换（拒绝 1:1 复刻插件模板，构建 MorphMD 原生排版美学）**：
+   - 在 `index.html` 中构建专属于多渠道排版工作台的暖米白书刊风（`#FAF9F5` / `#F5F4EF` + 赤陶色 `#D97757` + 雾凇蓝 `#4A6B82` + 衬线标题与明暗主题/中英双语切换）产品公开页，严禁照搬第三方插件的 LLM 服务商盒子（`.providers-box`）、波浪底线或外部作者署名，且所有首屏与屏下区块默认保持 `100%` 可见（禁止未滚动时空白隐身）：
+     - **工作室顶栏（`<header class="site-header">`）**：品牌 Logo、区块锚点导航、中/英双语切换（`#lang-toggle-btn`）、明/暗主题切换（`#theme-toggle-btn`）、GitHub 链接与「进入工作台」快捷入口；
+     - **书刊风 Hero 首屏（`.hero-section`）**：杂志风导语标签、衬线主副标题、主次行动按钮（`#launch-workbench-btn`、三端沙盒跳转、GitHub 源码），以及 `16:10` 原生比例无变形展示 `images/demo.mp4` 的实机画框（`.hero-showcase` 内含 `video.showcase-video`）；
+     - **左右分栏「一源三态」实时编译交互沙盒（`.isomorphic-studio-section` / `.hero-interactive-preview`）**：左栏展示真实的 `article.md` 原稿代码（含标题、楷体强调、外链、行内公式与引用块），右栏提供「微信公众号 / X 长文 / 图文卡片」三端切换按钮（`#demo-btn-wechat`、`#demo-btn-x`、`#demo-btn-cards`）与对应的真实 DOM 编译预览面板（`#demo-output-wechat`、`#demo-output-x`、`#demo-output-cards`）；
+     - **四大核心排版架构 Bento 矩阵（`#why-morphmd` / `.why-section`）**：4 张精炼架构卡片（`.feature-card`，中文说明控制在 20–62 字）；
+     - **核心编译管线深度剖析（`#walkthrough` / `.walkthrough-section`）**：4 组单层视觉剖析（`.walkthrough-row`），分别展示微信公众号白名单内联与外链展开、X 长文复杂块 2x Retina 光栅化、多比例卡片回溯分页与 CSS-Tree 双官方预设（`Anthropic 学术出版` / `Yoryon 书刊阅读`）；
+     - **快速上手指南（`#install-guide`）与纯净页脚（`.site-footer`）**：提供 3 步引导卡片（`.install-step-card`），保留 `<div id="root"></div>` 支持一键无缝切换至在线 React 工作台。
+
 ---
 
 ## 3. 真实执行与验收标准 (Verification)
