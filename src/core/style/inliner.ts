@@ -7,7 +7,7 @@ import {
   resolveScopeCustomProperties, computeElementVarScope, type LayerCandidate,
 } from './guard';
 import { DEFAULT_DESIGN_TOKENS, type DesignTokens } from './tokens';
-import { normalizeWeChatStructureAndStyles } from '../wechat/normalizer';
+import { expandExternalLinksToInlineText, normalizeWeChatStructureAndStyles } from '../wechat/normalizer';
 
 export interface InlineStyleOptions {
   customCss?: string;
@@ -117,6 +117,19 @@ ${tokenCssLines}
       color: var(--morph-ink);
       margin-top: 0px;
       margin-bottom: var(--morph-block-gap);
+    }
+    em {
+      font-family: "LXGW WenKai", "Kaiti SC", "STKaiti", "KaiTi", "Newsreader", Georgia, serif;
+      font-style: normal;
+      color: #32383F;
+    }
+    .morph-link-url,
+    .link-url {
+      color: #8C857B;
+      font-size: 0.85em;
+      font-family: var(--morph-font-mono);
+      font-weight: 400;
+      font-style: normal;
     }
     .morph-list {
       font-family: var(--morph-font-sans);
@@ -697,8 +710,11 @@ ${tokenCssLines}
     }
 
     // 3.45 WeChat article structure & style compliance guard (wechatjs/verify-article-structure-spec)
+    // and social media cards external link expansion
     if (capabilities.targetId === 'wechat') {
       normalizeWeChatStructureAndStyles(rootContainer, allDiagnostics, capabilities.allowedStyleProps);
+    } else if (capabilities.targetId === 'cards') {
+      expandExternalLinksToInlineText(rootContainer, allDiagnostics, 'cards', capabilities.allowedStyleProps);
     }
 
     // 3.5 Ensure strict compliance with allowedStyleProps across all styled elements
@@ -735,7 +751,9 @@ ${tokenCssLines}
             allowed.has(p) ||
             (allowed.has('border') && (p === 'border' || p.startsWith('border-'))) ||
             (allowed.has('text-decoration') &&
-              (p === 'text-decoration' || p.startsWith('text-decoration-'))) ||
+              (p === 'text-decoration' ||
+                p.startsWith('text-decoration-') ||
+                p === 'text-underline-offset')) ||
             (allowed.has('white-space') &&
               (p === 'white-space' ||
                 p === 'white-space-collapse' ||

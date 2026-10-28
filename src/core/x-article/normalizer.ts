@@ -1,5 +1,6 @@
 import { encodeRgbPngBytes, uint8ToBase64 } from '../dom/binary';
 import type { AdapterCapabilities, DiagnosticItem } from '../snapshot/types';
+import { convertTexToMathJaxSvgNode } from '../wechat/normalizer';
 
 function hashContent32(input: string): number {
   let h = 0x811c9dc5;
@@ -11,7 +12,430 @@ function hashContent32(input: string): number {
 }
 
 const rasterPngDataUrlCache = new Map<string, string>();
+const rasterMathMetaCache = new Map<string, { dataUrl: string; cssWidth: number; cssHeight: number }>();
 const MAX_RASTER_PNG_CACHE = 4096;
+
+function isJsdomDocument(doc?: Document | null): boolean {
+  const ua =
+    doc?.defaultView?.navigator?.userAgent ||
+    (typeof navigator !== 'undefined' ? navigator.userAgent : '') ||
+    '';
+  return /jsdom/i.test(ua);
+}
+
+function tryCreateCanvas2d(
+  doc?: Document | null
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+  if (isJsdomDocument(doc)) return null;
+  try {
+    const targetDoc =
+      doc && typeof doc.createElement === 'function'
+        ? doc
+        : typeof document !== 'undefined'
+          ? document
+          : null;
+    if (!targetDoc) return null;
+    const canvas = targetDoc.createElement('canvas');
+    if (!canvas || typeof canvas.getContext !== 'function') return null;
+    const ctx = canvas.getContext('2d');
+    if (!ctx || typeof ctx.fillText !== 'function' || typeof ctx.measureText !== 'function') {
+      return null;
+    }
+    return { canvas, ctx };
+  } catch {
+    return null;
+  }
+}
+
+function stampCanvasHashSignature(
+  ctx: CanvasRenderingContext2D,
+  contentHash: number,
+  baseBg: [number, number, number] = [255, 255, 255]
+): void {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (let bit = 0; bit < 16; bit++) {
+    const isSet = ((contentHash >>> bit) & 1) === 1;
+    const delta = isSet ? ((bit % 3) + 1) : -((bit % 3) + 1);
+    const r = Math.max(0, Math.min(255, baseBg[0] + delta));
+    const g = Math.max(0, Math.min(255, baseBg[1] + (((contentHash >>> (bit + 8)) & 1) ? 1 : -1)));
+    const b = Math.max(0, Math.min(255, baseBg[2] + (isSet ? -1 : 1)));
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    ctx.fillRect(26 + bit * 2, 1, 2, 2);
+  }
+  ctx.restore();
+}
+
+interface InlineTableToken {
+  text: string;
+  isCode: boolean;
+}
+
+function extractCellInlineTokens(cell: Element): InlineTableToken[] {
+  const tokens: InlineTableToken[] = [];
+  const walk = (node: Node, inCode: boolean) => {
+    if (node.nodeType === 3) {
+      const raw = (node.textContent || '').replace(/\s+/g, ' ');
+      if (!raw) return;
+      if (inCode) {
+        const trimmed = raw.trim();
+        if (trimmed) tokens.push({ text: trimmed, isCode: true });
+        return;
+      }
+      // Split non-code text into CJK characters or contiguous Latin/number/punctuation words
+      const parts = raw.match(/[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]|[^\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef\s]+|\s+/g);
+      if (parts) {
+        for (const p of parts) {
+          tokens.push({ text: p, isCode: false });
+        }
+      }
+      return;
+    }
+    if (node.nodeType === 1) {
+      const el = node as Element;
+      const tag = el.tagName.toLowerCase();
+      const nextCode = inCode || tag === 'code';
+      if (nextCode && tag === 'code') {
+        const codeTxt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (codeTxt) tokens.push({ text: codeTxt, isCode: true });
+        return;
+      }
+      for (let c = el.firstChild; c; c = c.nextSibling) {
+        walk(c, nextCode);
+      }
+    }
+  };
+  walk(cell, false);
+  // Trim leading/trailing whitespace tokens
+  while (tokens.length > 0 && !tokens[0].isCode && /^\s+$/.test(tokens[0].text)) {
+    tokens.shift();
+  }
+  while (
+    tokens.length > 0 &&
+    !tokens[tokens.length - 1].isCode &&
+    /^\s+$/.test(tokens[tokens.length - 1].text)
+  ) {
+    tokens.pop();
+  }
+  return tokens;
+}
+
+function renderTableToCanvasDataUrl(
+  table: Element,
+  doc: Document,
+  layoutWidth = 680
+): string | null {
+  const canvasCtx = tryCreateCanvas2d(doc);
+  if (!canvasCtx) return null;
+
+  const w = Math.max(320, Math.min(1200, Math.round(layoutWidth)));
+  const cacheKey = `canvas-table:${w}:${table.innerHTML}`;
+  const cached = rasterPngDataUrlCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const trElements = Array.from(table.querySelectorAll('tr'));
+  if (trElements.length === 0) return null;
+
+  const rowsData = trElements.map((tr, rIdx) => {
+    const isHeaderRow =
+      Boolean(tr.closest('thead')) ||
+      (rIdx === 0 && tr.querySelectorAll('th').length > 0);
+    const cells = Array.from(tr.querySelectorAll('th, td')).map((cell) => ({
+      isHeader: isHeaderRow || cell.tagName.toLowerCase() === 'th',
+      tokens: extractCellInlineTokens(cell),
+    }));
+    return { isHeaderRow, cells };
+  });
+
+  const numCols = Math.max(1, ...rowsData.map((r) => r.cells.length));
+  const { canvas, ctx } = canvasCtx;
+
+  const sansFontStack =
+    '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Inter", sans-serif';
+  const monoFontStack =
+    '"JetBrains Mono", "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace';
+  const baseFontSize = 13.5;
+  const codeFontSize = 12;
+  const lineHeight = 22;
+  const cellPadX = 12;
+  const cellPadY = 11;
+
+  const measureTokenWidth = (tok: InlineTableToken, isHeader: boolean): number => {
+    if (tok.isCode) {
+      ctx.font = `${isHeader ? '600' : '400'} ${codeFontSize}px ${monoFontStack}`;
+      return Math.ceil(ctx.measureText(tok.text).width) + 10;
+    }
+    ctx.font = `${isHeader ? '600' : '400'} ${baseFontSize}px ${sansFontStack}`;
+    return ctx.measureText(tok.text).width;
+  };
+
+  // Estimate desired width per column
+  const colDesiredWidths = new Array<number>(numCols).fill(80);
+  for (const row of rowsData) {
+    for (let c = 0; c < numCols; c++) {
+      const cell = row.cells[c];
+      if (!cell) continue;
+      const totalW =
+        cell.tokens.reduce((acc, tok) => acc + measureTokenWidth(tok, cell.isHeader), 0) +
+        cellPadX * 2 +
+        4;
+      if (totalW > colDesiredWidths[c]) {
+        colDesiredWidths[c] = totalW;
+      }
+    }
+  }
+
+  const minColW = Math.max(76, Math.floor((w - 2) / (numCols * 1.75)));
+  const maxColW = Math.max(minColW, Math.floor((w - 2) * 0.45));
+  const clampedWeights = colDesiredWidths.map((cw) => Math.max(minColW, Math.min(maxColW, cw)));
+  const weightSum = clampedWeights.reduce((a, b) => a + b, 0) || 1;
+  const innerTableW = w - 2;
+  const colWidths = clampedWeights.map((cw) => Math.max(minColW, Math.floor((cw / weightSum) * innerTableW)));
+  const currentSum = colWidths.reduce((a, b) => a + b, 0);
+  colWidths[colWidths.length - 1] += innerTableW - currentSum;
+
+  // Wrap tokens into lines per cell
+  const wrappedRows = rowsData.map((row) => {
+    let maxLines = 1;
+    const wrappedCells = [];
+    for (let c = 0; c < numCols; c++) {
+      const cell = row.cells[c] || { isHeader: row.isHeaderRow, tokens: [] };
+      const availW = Math.max(36, colWidths[c] - cellPadX * 2);
+      const lines: InlineTableToken[][] = [];
+      let currentLine: InlineTableToken[] = [];
+      let currentW = 0;
+
+      for (const tok of cell.tokens) {
+        if (!tok.isCode && /^\s+$/.test(tok.text) && currentLine.length === 0) {
+          continue;
+        }
+        const tokW = measureTokenWidth(tok, cell.isHeader);
+        if (currentLine.length > 0 && currentW + tokW > availW) {
+          lines.push(currentLine);
+          currentLine = !tok.isCode && /^\s+$/.test(tok.text) ? [] : [tok];
+          currentW = currentLine.length > 0 ? tokW : 0;
+        } else {
+          currentLine.push(tok);
+          currentW += tokW;
+        }
+      }
+      if (currentLine.length > 0 || lines.length === 0) {
+        lines.push(currentLine);
+      }
+      if (lines.length > maxLines) maxLines = lines.length;
+      wrappedCells.push({ isHeader: cell.isHeader, lines });
+    }
+    const rowH = maxLines * lineHeight + cellPadY * 2;
+    return { isHeaderRow: row.isHeaderRow, rowH, cells: wrappedCells };
+  });
+
+  const totalH = wrappedRows.reduce((sum, r) => sum + r.rowH, 0) + 2;
+  const dpr = 2;
+  canvas.width = w * dpr;
+  canvas.height = totalH * dpr;
+  ctx.scale(dpr, dpr);
+
+  // Draw table background & borders
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, w, totalH);
+
+  let curY = 1;
+  for (let rIdx = 0; rIdx < wrappedRows.length; rIdx++) {
+    const row = wrappedRows[rIdx];
+    if (row.isHeaderRow) {
+      ctx.fillStyle = '#F5F4F0';
+      ctx.fillRect(1, curY, innerTableW, row.rowH);
+    } else if (rIdx % 2 === 0) {
+      ctx.fillStyle = '#FAF9F6';
+      ctx.fillRect(1, curY, innerTableW, row.rowH);
+    }
+
+    let curX = 1;
+    for (let cIdx = 0; cIdx < numCols; cIdx++) {
+      const colW = colWidths[cIdx];
+      const cell = row.cells[cIdx];
+      if (cIdx > 0) {
+        ctx.fillStyle = '#EAE7E0';
+        ctx.fillRect(curX, curY, 1, row.rowH);
+      }
+
+      if (cell) {
+        for (let lIdx = 0; lIdx < cell.lines.length; lIdx++) {
+          const lineTokens = cell.lines[lIdx];
+          let textX = curX + cellPadX;
+          const baselineY = curY + cellPadY + lIdx * lineHeight + 15.5;
+          for (const tok of lineTokens) {
+            if (tok.isCode) {
+              ctx.font = `${cell.isHeader ? '600' : '400'} ${codeFontSize}px ${monoFontStack}`;
+              const textW = Math.ceil(ctx.measureText(tok.text).width);
+              const pillW = textW + 8;
+              const pillH = 18;
+              const pillY = baselineY - 13.5;
+              ctx.fillStyle = row.isHeaderRow ? '#EAE6DF' : '#F1EFEA';
+              ctx.fillRect(textX, pillY, pillW, pillH);
+              ctx.strokeStyle = '#DFDCD4';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(textX + 0.5, pillY + 0.5, pillW - 1, pillH - 1);
+              ctx.fillStyle = '#B85A3A';
+              ctx.fillText(tok.text, textX + 4, baselineY - 0.5);
+              textX += pillW + 2;
+            } else {
+              ctx.font = `${cell.isHeader ? '600' : '400'} ${baseFontSize}px ${sansFontStack}`;
+              ctx.fillStyle = cell.isHeader ? '#141413' : '#1F1E1D';
+              ctx.fillText(tok.text, textX, baselineY);
+              textX += ctx.measureText(tok.text).width;
+            }
+          }
+        }
+      }
+      curX += colW;
+    }
+
+    curY += row.rowH;
+    if (rIdx < wrappedRows.length - 1) {
+      ctx.fillStyle = row.isHeaderRow ? '#D8D4CB' : '#E6E3DC';
+      ctx.fillRect(1, curY - 1, innerTableW, 1);
+    }
+  }
+
+  // Outer table frame
+  ctx.strokeStyle = '#D8D4CB';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, w - 1, totalH - 1);
+
+  stampCanvasHashSignature(ctx, hashContent32(table.textContent || 'table'));
+
+  const dataUrl = canvas.toDataURL('image/png');
+  if (!dataUrl || !dataUrl.startsWith('data:image/png;base64,')) return null;
+  if (rasterPngDataUrlCache.size >= MAX_RASTER_PNG_CACHE) {
+    const oldestKey = rasterPngDataUrlCache.keys().next().value;
+    if (oldestKey !== undefined) rasterPngDataUrlCache.delete(oldestKey);
+  }
+  rasterPngDataUrlCache.set(cacheKey, dataUrl);
+  return dataUrl;
+}
+
+function applySvgTransformString(ctx: CanvasRenderingContext2D, transformStr: string): void {
+  const regex = /(translate|scale|matrix)\s*\(([^)]+)\)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(transformStr)) !== null) {
+    const fn = match[1].toLowerCase();
+    const nums = match[2]
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number);
+    if (fn === 'translate') {
+      ctx.translate(nums[0] || 0, nums[1] || 0);
+    } else if (fn === 'scale') {
+      const sx = nums[0] ?? 1;
+      const sy = nums.length > 1 ? nums[1] : sx;
+      ctx.scale(sx, sy);
+    } else if (fn === 'matrix' && nums.length >= 6) {
+      ctx.transform(nums[0], nums[1], nums[2], nums[3], nums[4], nums[5]);
+    }
+  }
+}
+
+function renderLiteSvgNodeOnCanvas(ctx: CanvasRenderingContext2D, node: any): void {
+  if (!node || typeof node !== 'object') return;
+  ctx.save();
+  const attrs = node.attributes || {};
+  if (attrs.transform) {
+    applySvgTransformString(ctx, String(attrs.transform));
+  }
+  if (node.kind === 'path' && attrs.d && typeof Path2D !== 'undefined') {
+    try {
+      const path = new Path2D(String(attrs.d));
+      ctx.fill(path);
+    } catch {
+      // Ignore malformed path data
+    }
+  } else if (node.kind === 'rect') {
+    const rx = parseFloat(attrs.x || '0') || 0;
+    const ry = parseFloat(attrs.y || '0') || 0;
+    const rw = parseFloat(attrs.width || '0') || 0;
+    const rh = parseFloat(attrs.height || '0') || 0;
+    if (rw > 0 && rh > 0) {
+      ctx.fillRect(rx, ry, rw, rh);
+    }
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      renderLiteSvgNodeOnCanvas(ctx, child);
+    }
+  }
+  ctx.restore();
+}
+
+function renderMathToCanvasDataUrl(
+  rawTex: string,
+  isDisplay: boolean,
+  doc: Document
+): { dataUrl: string; cssWidth: number; cssHeight: number } | null {
+  const canvasCtx = tryCreateCanvas2d(doc);
+  if (!canvasCtx) return null;
+
+  const tex = (rawTex || 'math').trim();
+  const cacheKey = `${isDisplay ? 'block' : 'inline'}:${tex}`;
+  const cached = rasterMathMetaCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const svgNode = convertTexToMathJaxSvgNode(tex, isDisplay);
+  const { canvas, ctx } = canvasCtx;
+
+  if (svgNode && typeof Path2D !== 'undefined') {
+    const attrs = svgNode.attributes || {};
+    const vbParts = String(attrs.viewBox || '0 -600 2000 800')
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number);
+    const minX = vbParts[0] || 0;
+    const minY = vbParts[1] || 0;
+    const vbW = Math.max(1, vbParts[2] || 1000);
+    const vbH = Math.max(1, vbParts[3] || 600);
+
+    const exW = parseFloat(String(attrs.width || '').replace('ex', '')) || vbW / 440;
+    const exH = parseFloat(String(attrs.height || '').replace('ex', '')) || vbH / 440;
+    const pxPerEx = isDisplay ? 8.5 : 7.8;
+
+    const drawW = Math.max(12, Math.round(exW * pxPerEx));
+    const drawH = Math.max(12, Math.round(exH * pxPerEx));
+    const padX = isDisplay ? 18 : 2;
+    const padY = isDisplay ? 12 : 2;
+
+    const cssWidth = isDisplay ? Math.min(680, Math.max(drawW + padX * 2, 160)) : drawW + padX * 2;
+    const cssHeight = drawH + padY * 2;
+
+    // Ensure physical PNG width >= 72 so inspectRasterDataUrl always finds interior content pixels at x >= 24
+    const dpr = Math.max(2, Math.ceil(72 / Math.max(1, cssWidth)));
+    canvas.width = cssWidth * dpr;
+    canvas.height = cssHeight * dpr;
+    ctx.scale(dpr, dpr);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+    const offsetX = isDisplay ? Math.max(padX, (cssWidth - drawW) / 2) : padX;
+    ctx.save();
+    ctx.translate(offsetX, padY);
+    ctx.scale(drawW / vbW, drawH / vbH);
+    ctx.translate(-minX, -minY);
+    ctx.fillStyle = '#141413';
+    renderLiteSvgNodeOnCanvas(ctx, svgNode);
+    ctx.restore();
+
+    stampCanvasHashSignature(ctx, hashContent32(tex));
+
+    const dataUrl = canvas.toDataURL('image/png');
+    if (dataUrl && dataUrl.startsWith('data:image/png;base64,')) {
+      const result = { dataUrl, cssWidth, cssHeight };
+      rasterMathMetaCache.set(cacheKey, result);
+      return result;
+    }
+  }
+
+  return null;
+}
 
 function createRasterPngDataUrl(lines: string[], width = 680): string {
   const normalizedLines = lines.length > 0 ? lines : ['raster'];
@@ -466,12 +890,16 @@ export function normalizeXArticleStructureAndStyles(
       const sourceRange = table.getAttribute('data-source-range');
       const lines = extractTableSummaryLines(table);
       const altText = lines.join(' ; ');
-      const dataUrl = createRasterPngDataUrl(lines, 680);
+      const canvasDataUrl = renderTableToCanvasDataUrl(table, doc, 680);
+      const dataUrl = canvasDataUrl || createRasterPngDataUrl(lines, 680);
 
       const img = doc.createElement('img');
       img.className = 'morph-img morph-raster-img';
       img.setAttribute('data-morph-rasterized', 'true');
       img.setAttribute('data-raster-type', 'table');
+      if (canvasDataUrl) {
+        img.setAttribute('data-canvas-rasterized', 'true');
+      }
       img.setAttribute('src', dataUrl);
       img.setAttribute('data-morph-snapshot-src', dataUrl);
       img.setAttribute('alt', altText);
@@ -551,11 +979,23 @@ export function normalizeXArticleStructureAndStyles(
         mathEl.tagName.toLowerCase() === 'div' ||
         Boolean(mathEl.querySelector('.katex-display'));
 
-      const dataUrl = createRasterPngDataUrl([tex || 'math'], isDisplay ? 600 : Math.max(120, (tex.length || 4) * 12 + 32));
+      const canvasMath = renderMathToCanvasDataUrl(tex || 'math', isDisplay, doc);
+      const dataUrl = canvasMath
+        ? canvasMath.dataUrl
+        : createRasterPngDataUrl(
+            [tex || 'math'],
+            isDisplay ? 600 : Math.max(120, (tex.length || 4) * 12 + 32)
+          );
       const img = doc.createElement('img');
       img.className = 'morph-img morph-raster-img';
       img.setAttribute('data-morph-rasterized', 'true');
       img.setAttribute('data-raster-type', 'math');
+      img.setAttribute('data-math-display', isDisplay ? 'block' : 'inline');
+      if (canvasMath) {
+        img.setAttribute('data-canvas-rasterized', 'true');
+        img.setAttribute('width', String(canvasMath.cssWidth));
+        img.setAttribute('height', String(canvasMath.cssHeight));
+      }
       if (tex) img.setAttribute('data-math-tex', tex);
       img.setAttribute('alt', tex || 'math');
       img.setAttribute('src', dataUrl);

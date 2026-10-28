@@ -691,6 +691,29 @@ body,
   margin: 24px 0;
 }
 
+.morph-preview-stage[data-target-view="x-article"] img[data-raster-type="table"] {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 16px 0;
+  border-radius: 10px;
+}
+
+.morph-preview-stage[data-target-view="x-article"] img[data-raster-type="math"][data-math-display="block"] {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 14px auto;
+}
+
+.morph-preview-stage[data-target-view="x-article"] img[data-raster-type="math"][data-math-display="inline"] {
+  display: inline-block;
+  vertical-align: middle;
+  max-width: 100%;
+  height: auto;
+  margin: 0 2px;
+}
+
 /* Right Column: Style Settings Drawer */
 .morph-style-drawer {
   flex: 0 0 auto;
@@ -1252,158 +1275,128 @@ body,
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  padding: 20px 26px 28px;
 }
 
-.morph-guide-section {
+.morph-guide-markdown-doc .morph-doc {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  font-family: var(--ui-font-sans);
+  font-size: 13.5px;
+  line-height: 1.72;
+  color: var(--ui-ink);
 }
 
-.morph-guide-section-title {
-  margin: 0;
-  font-size: 13px;
+.morph-guide-markdown-doc h1 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ui-ink);
+  letter-spacing: -0.01em;
+}
+
+.morph-guide-markdown-doc h2 {
+  margin: 16px 0 4px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--ui-ink);
 }
 
-.morph-guide-section-desc {
+.morph-guide-markdown-doc h3 {
+  margin: 10px 0 2px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ui-ink);
+}
+
+.morph-guide-markdown-doc p {
   margin: 0;
+  color: var(--ui-ink);
+}
+
+.morph-guide-markdown-doc ul,
+.morph-guide-markdown-doc ol {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.morph-guide-markdown-doc li {
+  line-height: 1.65;
+  color: var(--ui-ink);
+}
+
+.morph-guide-markdown-doc blockquote {
+  margin: 4px 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--ui-border-strong);
+  background-color: #f8f7f5;
+  border-radius: 0 6px 6px 0;
+  color: var(--ui-ink-secondary);
+}
+
+.morph-guide-markdown-doc code {
+  font-family: var(--ui-font-mono);
   font-size: 12px;
-  color: var(--ui-ink-secondary);
-  line-height: 1.45;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background-color: #f3f2ee;
+  color: #8a3b12;
 }
 
-.morph-guide-selector-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.morph-guide-selector-card {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 9px;
-  border-radius: 7px;
+.morph-guide-markdown-doc pre {
+  margin: 4px 0;
+  padding: 12px 14px;
+  border-radius: 8px;
   border: 1px solid var(--ui-border);
   background-color: #fbfbfa;
+  overflow-x: auto;
+  line-height: 1.58;
 }
 
-.morph-guide-selector-code {
-  font-family: var(--ui-font-mono);
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #2383e2;
-}
-
-.morph-guide-selector-label {
-  font-size: 11px;
-  color: var(--ui-ink-secondary);
-}
-
-.morph-guide-token-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.morph-guide-token-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 6px 10px;
-  border-radius: 7px;
-  border: 1px solid var(--ui-border);
-  background-color: #fbfbfa;
-  font-size: 11px;
-  color: var(--ui-ink-secondary);
-}
-
-.morph-guide-token-row code {
-  font-family: var(--ui-font-mono);
-  font-size: 11.5px;
-  font-weight: 600;
+.morph-guide-markdown-doc pre code {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--ui-ink);
+  font-size: 12px;
 }
 
-.morph-guide-example-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.morph-guide-example-card {
+.morph-guide-markdown-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0;
+  font-size: 12.5px;
   border: 1px solid var(--ui-border);
   border-radius: 8px;
   overflow: hidden;
-  background-color: #fbfbfa;
 }
 
-.morph-guide-example-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 7px 12px;
+.morph-guide-markdown-doc th,
+.morph-guide-markdown-doc td {
+  padding: 8px 12px;
+  text-align: left;
   border-bottom: 1px solid var(--ui-border);
-  background-color: #f4f4f2;
-  font-size: 11.5px;
+  vertical-align: top;
+}
+
+.morph-guide-markdown-doc th {
+  background-color: #f5f4f1;
   font-weight: 600;
   color: var(--ui-ink);
 }
 
-.morph-guide-insert-btn {
-  appearance: none;
-  border: 1px solid var(--ui-border-strong);
-  background-color: var(--ui-bg-surface);
-  color: var(--ui-ink);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  height: 24px;
-  padding: 0 9px;
-  border-radius: 5px;
-  cursor: pointer;
+.morph-guide-markdown-doc tr:last-child td {
+  border-bottom: none;
 }
 
-.morph-guide-insert-btn:hover {
-  border-color: var(--ui-ink);
-  background-color: var(--ui-bg-hover);
-}
-
-.morph-guide-pre {
-  margin: 0;
-  padding: 10px 12px;
-  font-family: var(--ui-font-mono);
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: var(--ui-ink);
-  overflow-x: auto;
-}
-
-.morph-guide-notes {
-  margin: 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--ui-ink-secondary);
-}
-
-.morph-guide-notes code {
-  font-family: var(--ui-font-mono);
-  font-size: 11px;
-  padding: 1px 4px;
-  border-radius: 4px;
-  background-color: #f1f1ef;
-  color: var(--ui-ink);
+.morph-guide-markdown-doc hr {
+  border: none;
+  border-top: 1px solid var(--ui-border);
+  margin: 8px 0;
 }
 
 .morph-guide-modal-footer {

@@ -49,6 +49,21 @@ function flattenLiteSvgNode(node: any): void {
   node.children = newChildren;
 }
 
+export function convertTexToMathJaxSvgNode(rawTex: string, displayMode: boolean): any | null {
+  const tex = rawTex.trim();
+  if (!tex) return null;
+  try {
+    const { doc } = getMathJaxDocument();
+    const container = doc.convert(tex, { display: displayMode });
+    flattenLiteSvgNode(container);
+    const svgNode = container?.children?.[0];
+    if (!svgNode || svgNode.kind !== 'svg') return null;
+    return svgNode;
+  } catch {
+    return null;
+  }
+}
+
 function renderTexToWeChatSvg(rawTex: string, displayMode: boolean): string | null {
   const tex = rawTex.trim();
   if (!tex) return null;
@@ -501,6 +516,95 @@ export function dedupeWeChatNesting(rootContainer: Element, diagnostics?: Diagno
 }
 
 /**
+ * Expands external `<a href="...">` links into `.morph-link-text` + `.morph-link-url.link-url`
+ * for non-interactive static targets (`wechat` and `cards`).
+ */
+export function expandExternalLinksToInlineText(
+  rootContainer: Element,
+  diagnostics: DiagnosticItem[],
+  targetId: 'wechat' | 'cards',
+  allowedStyleProps?: ReadonlySet<string>
+): void {
+  const canSetProp = (prop: string) => !allowedStyleProps || allowedStyleProps.has(prop);
+
+  rootContainer.querySelectorAll<HTMLElement>('a[href]').forEach((anchor) => {
+    const href = (anchor.getAttribute('href') || '').trim();
+    const isInternalOrAnchor =
+      !href ||
+      href.startsWith('#') ||
+      (targetId === 'wechat' && /^https?:\/\/mp\.weixin\.qq\.com(?:\/|$)/i.test(href));
+    if (isInternalOrAnchor) return;
+
+    const doc = anchor.ownerDocument;
+    if (!doc) return;
+
+    const span = doc.createElement('span');
+    for (const attr of Array.from(anchor.attributes)) {
+      const attrName = attr.name.toLowerCase();
+      if (attrName === 'href' || attrName === 'target' || attrName === 'rel') {
+        continue;
+      }
+      span.setAttribute(attr.name, attr.value);
+    }
+    span.classList.add('morph-link-text');
+    span.setAttribute('data-original-href', href);
+
+    span.style.removeProperty('border-bottom');
+    span.style.removeProperty('border-bottom-width');
+    span.style.removeProperty('border-bottom-style');
+    span.style.removeProperty('border-bottom-color');
+    span.style.removeProperty('padding-bottom');
+    span.style.removeProperty('text-decoration');
+    span.style.removeProperty('text-decoration-line');
+    span.style.removeProperty('text-decoration-color');
+    span.style.removeProperty('text-underline-offset');
+
+    if (!span.style.getPropertyValue('color') && canSetProp('color')) {
+      span.style.setProperty('color', '#B85A3A');
+    }
+
+    while (anchor.firstChild) {
+      span.appendChild(anchor.firstChild);
+    }
+    const rawText = (span.textContent || '').trim();
+    if (rawText && !rawText.includes(href)) {
+      const urlSpan = doc.createElement('span');
+      urlSpan.className = 'morph-link-url link-url';
+      if (canSetProp('color')) urlSpan.style.setProperty('color', '#8C857B');
+      if (canSetProp('font-size')) urlSpan.style.setProperty('font-size', '0.85em');
+      if (canSetProp('font-family')) {
+        urlSpan.style.setProperty(
+          'font-family',
+          '"JetBrains Mono", "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace'
+        );
+      }
+      if (canSetProp('font-weight')) urlSpan.style.setProperty('font-weight', '400');
+      if (canSetProp('font-style')) urlSpan.style.setProperty('font-style', 'normal');
+      urlSpan.textContent = ` (${href})`;
+      span.appendChild(urlSpan);
+    } else if (!rawText) {
+      span.textContent = href;
+    }
+
+    const nodeId = anchor.getAttribute('data-node-id') || undefined;
+    const rangeStr = anchor.getAttribute('data-source-range');
+    const sourceRange = rangeStr ? (rangeStr.split('-').map(Number) as [number, number]) : undefined;
+
+    anchor.parentNode?.replaceChild(span, anchor);
+    if (targetId === 'wechat') {
+      diagnostics.push({
+        code: 'structure/wechat-external-link-degraded',
+        message: `Degraded external link "${href}" to inline text for WeChat Official Account compatibility.`,
+        severity: 'info',
+        targetId: 'wechat',
+        nodeId,
+        sourceRange,
+      });
+    }
+  });
+}
+
+/**
  * Normalizes DOM structure and inline styles for the `wechat` target so that
  * generated HTML strictly passes `wechatjs/verify-article-structure-spec`.
  */
@@ -673,59 +777,7 @@ export function normalizeWeChatStructureAndStyles(
 
   // 0.3 Degrade external <a href="..."> links to inline text (.morph-link-text) because
   // WeChat Official Account forbids embedding non-WeChat external hyperlinks in article body
-  rootContainer.querySelectorAll<HTMLElement>('a[href]').forEach((anchor) => {
-    const href = (anchor.getAttribute('href') || '').trim();
-    const isWeChatInternalOrAnchor =
-      !href ||
-      href.startsWith('#') ||
-      /^https?:\/\/mp\.weixin\.qq\.com(?:\/|$)/i.test(href);
-    if (isWeChatInternalOrAnchor) return;
-
-    const doc = anchor.ownerDocument;
-    if (!doc) return;
-
-    const span = doc.createElement('span');
-    for (const attr of Array.from(anchor.attributes)) {
-      const attrName = attr.name.toLowerCase();
-      if (attrName === 'href' || attrName === 'target' || attrName === 'rel') {
-        continue;
-      }
-      span.setAttribute(attr.name, attr.value);
-    }
-    span.classList.add('morph-link-text');
-    span.setAttribute('data-original-href', href);
-
-    span.style.removeProperty('border-bottom');
-    span.style.removeProperty('border-bottom-width');
-    span.style.removeProperty('border-bottom-style');
-    span.style.removeProperty('border-bottom-color');
-    span.style.removeProperty('padding-bottom');
-    span.style.removeProperty('text-decoration');
-
-    while (anchor.firstChild) {
-      span.appendChild(anchor.firstChild);
-    }
-    const rawText = (span.textContent || '').trim();
-    if (rawText && !rawText.includes(href)) {
-      span.appendChild(doc.createTextNode(` (${href})`));
-    } else if (!rawText) {
-      span.textContent = href;
-    }
-
-    const nodeId = anchor.getAttribute('data-node-id') || undefined;
-    const rangeStr = anchor.getAttribute('data-source-range');
-    const sourceRange = rangeStr ? (rangeStr.split('-').map(Number) as [number, number]) : undefined;
-
-    anchor.parentNode?.replaceChild(span, anchor);
-    diagnostics.push({
-      code: 'structure/wechat-external-link-degraded',
-      message: `Degraded external link "${href}" to inline text for WeChat Official Account compatibility.`,
-      severity: 'info',
-      targetId: 'wechat',
-      nodeId,
-      sourceRange,
-    });
-  });
+  expandExternalLinksToInlineText(rootContainer, diagnostics, 'wechat', allowedStyleProps);
 
   // 0.4 Convert .morph-callout internal .morph-callout-title, .morph-callout-body, and .morph-p
   // into inline <span> elements separated by direct <br> children (zero <p>, <div>, or <section>
@@ -1373,7 +1425,7 @@ export function normalizeWeChatStructureAndStyles(
         const normalizedFf = ff.replace(/["']/g, '').replace(/\s+/g, ' ').trim();
         const wechatFontPrefix = 'mp-quote, PingFang SC, system-ui, -apple-system';
         const isRecognizedEditorialOrCodeFont =
-          /\b(?:Newsreader|Iowan Old Style|Palatino|Noto Serif SC|Songti SC|STSong|Source Serif 4|Georgia|Inter|PingFang SC|JetBrains Mono|SF Mono|SFMono-Regular|Consolas|Liberation Mono|Menlo|Fira Code|ui-monospace|monospace)\b/i.test(
+          /\b(?:Newsreader|Iowan Old Style|Palatino|LXGW WenKai|Kaiti SC|STKaiti|KaiTi|Noto Serif SC|Songti SC|STSong|Source Serif 4|Georgia|Inter|PingFang SC|JetBrains Mono|SF Mono|SFMono-Regular|Consolas|Liberation Mono|Menlo|Fira Code|ui-monospace|monospace)\b/i.test(
             normalizedFf
           );
         if (!normalizedFf.startsWith(wechatFontPrefix) && !isRecognizedEditorialOrCodeFont) {

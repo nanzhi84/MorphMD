@@ -14,6 +14,8 @@ export const DEFAULT_ALLOWED_STYLE_PROPS = new Set([
   'letter-spacing',
   'text-align',
   'text-decoration',
+  'text-decoration-color',
+  'text-underline-offset',
   'text-indent',
   'padding', 'padding-top', 'padding-bottom', 'padding-left', 'padding-right',
   'margin', 'margin-top', 'margin-bottom', 'margin-left', 'margin-right',

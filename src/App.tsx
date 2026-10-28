@@ -6,14 +6,15 @@ import type { CardAspectRatio, CardsZipExportResult } from './core/cards/types';
 import { normalizeSelectionRange, serializeFullSnapshot } from './core/selection/normalizer';
 import type { ClipboardPayload } from './core/selection/types';
 import { createEditorSession, EditorSessionController } from './core/session/controller';
+import { compileMarkdownSync } from './core/ast/compiler';
 import { createDeliverySnapshotSync } from './core/snapshot/builder';
 import type { DeliverySnapshot, DiagnosticItem, TargetId } from './core/snapshot/types';
 import type { DesignTokens } from './core/style/tokens';
 import {
   buildDefaultShowcaseMarkdown,
   createShowcaseCoverPng,
-  CSS_SELECTOR_REFERENCE,
   CSS_TUTORIAL_GUIDE_LINES,
+  CUSTOM_CSS_GUIDE_MARKDOWN,
   DEFAULT_SAVED_CSS_PRESETS,
   HEADING_SCALE_OPTIONS,
   HEADING_STYLE_OPTIONS,
@@ -667,15 +668,7 @@ export const App: React.FC<AppProps> = ({
     setCssViewMode('list');
   }, [applyCustomCssValue, editingCssPresetId]);
 
-  const handleInsertCssGuideExample = useCallback(
-    async (exampleCss: string) => {
-      const current = customCssRef.current.trim();
-      const nextCss = current ? `${current}\n\n${exampleCss}` : exampleCss;
-      await applyCustomCssValue(nextCss);
-      setCssGuideOpen(false);
-    },
-    [applyCustomCssValue]
-  );
+  const cssGuideHtml = useMemo(() => compileMarkdownSync(CUSTOM_CSS_GUIDE_MARKDOWN).html, []);
 
   useEffect(() => {
     const dialogEl = cssGuideDialogRef.current;
@@ -1752,132 +1745,11 @@ export const App: React.FC<AppProps> = ({
               </button>
             </div>
 
-            <div className="morph-guide-modal-body">
-              <section className="morph-guide-section">
-                <h3 className="morph-guide-section-title">1. 语义化元素选择器</h3>
-                <p className="morph-guide-section-desc">
-                  MorphMD 会为编译后的文档节点自动注入统一的 <code>.morph-*</code> 语义类名：
-                </p>
-                <div className="morph-guide-selector-grid">
-                  {CSS_SELECTOR_REFERENCE.map((item) => (
-                    <div key={item.token} className="morph-guide-selector-card">
-                      <code className="morph-guide-selector-code">{item.token}</code>
-                      <span className="morph-guide-selector-label">{item.label}</span>
-                    </div>
-                  ))}
-                  <div className="morph-guide-selector-card">
-                    <code className="morph-guide-selector-code">strong / em</code>
-                    <span className="morph-guide-selector-label">加粗重点 / 斜体强调</span>
-                  </div>
-                  <div className="morph-guide-selector-card">
-                    <code className="morph-guide-selector-code">::before / ::after</code>
-                    <span className="morph-guide-selector-label">伪元素装饰（自动物化）</span>
-                  </div>
-                </div>
-              </section>
-
-              <section className="morph-guide-section">
-                <h3 className="morph-guide-section-title">2. 内置主题变量 (Design Tokens)</h3>
-                <p className="morph-guide-section-desc">
-                  在自定义 CSS 中直接引用以下变量，切换「主题」或「排版」设置时会自动联动生效：
-                </p>
-                <div className="morph-guide-token-list">
-                  <div className="morph-guide-token-row">
-                    <code>var(--morph-accent)</code>
-                    <span>当前选中的主题强调色（如标题左框线、重点标色）</span>
-                  </div>
-                  <div className="morph-guide-token-row">
-                    <code>var(--morph-ink)</code>
-                    <span>正文主墨水色（随纸张浅色/深色模式自动适配）</span>
-                  </div>
-                  <div className="morph-guide-token-row">
-                    <code>var(--morph-bg)</code>
-                    <span>画布与纸张背景底色</span>
-                  </div>
-                  <div className="morph-guide-token-row">
-                    <code>var(--morph-body-size) / var(--morph-line-height)</code>
-                    <span>基础正文字号与行高基准值</span>
-                  </div>
-                </div>
-              </section>
-
-              <section className="morph-guide-section">
-                <h3 className="morph-guide-section-title">3. 常用排版代码示例</h3>
-                <div className="morph-guide-example-list">
-                  <div className="morph-guide-example-card">
-                    <div className="morph-guide-example-head">
-                      <span>示例一：二级标题左侧强调竖线</span>
-                      <button
-                        type="button"
-                        className="morph-guide-insert-btn"
-                        onClick={() =>
-                          void handleInsertCssGuideExample(
-                            '.morph-h2 {\n  border-left: 3px solid var(--morph-accent);\n  padding-left: 10px;\n  margin: 16px 0;\n}'
-                          )
-                        }
-                      >
-                        填入编辑器
-                      </button>
-                    </div>
-                    <pre className="morph-guide-pre" tabIndex={0}>
-                      <code>{`.morph-h2 {\n  border-left: 3px solid var(--morph-accent);\n  padding-left: 10px;\n  margin: 16px 0;\n}`}</code>
-                    </pre>
-                  </div>
-
-                  <div className="morph-guide-example-card">
-                    <div className="morph-guide-example-head">
-                      <span>示例二：引用容器暖灰卡片与圆角左框</span>
-                      <button
-                        type="button"
-                        className="morph-guide-insert-btn"
-                        onClick={() =>
-                          void handleInsertCssGuideExample(
-                            '.morph-quote {\n  border: 1px solid #e9e9e7;\n  border-left: 4px solid var(--morph-accent);\n  background-color: #f7f7f5;\n  padding: 12px 16px;\n  border-radius: 8px;\n}'
-                          )
-                        }
-                      >
-                        填入编辑器
-                      </button>
-                    </div>
-                    <pre className="morph-guide-pre" tabIndex={0}>
-                      <code>{`.morph-quote {\n  border: 1px solid #e9e9e7;\n  border-left: 4px solid var(--morph-accent);\n  background-color: #f7f7f5;\n  padding: 12px 16px;\n  border-radius: 8px;\n}`}</code>
-                    </pre>
-                  </div>
-
-                  <div className="morph-guide-example-card">
-                    <div className="morph-guide-example-head">
-                      <span>示例三：正文粗体荧光笔高亮标记</span>
-                      <button
-                        type="button"
-                        className="morph-guide-insert-btn"
-                        onClick={() =>
-                          void handleInsertCssGuideExample(
-                            '.morph-p strong {\n  background-color: #faebdd;\n  padding: 1px 5px;\n  border-radius: 3px;\n}'
-                          )
-                        }
-                      >
-                        填入编辑器
-                      </button>
-                    </div>
-                    <pre className="morph-guide-pre" tabIndex={0}>
-                      <code>{`.morph-p strong {\n  background-color: #faebdd;\n  padding: 1px 5px;\n  border-radius: 3px;\n}`}</code>
-                    </pre>
-                  </div>
-                </div>
-              </section>
-
-              <section className="morph-guide-section">
-                <h3 className="morph-guide-section-title">4. 平台安全白名单与兼容规范</h3>
-                <ul className="morph-guide-notes">
-                  <li>
-                    <strong>微信公众号 & 图文卡片</strong>：支持字号、颜色、内外边距、边框、圆角、背景色等排版属性自动计算并内联至节点 <code>style</code>；<code>::before</code> / <code>::after</code> 伪元素会自动物化为真实内联节点。
-                  </li>
-                  <li>
-                    <strong>禁用属性拦截</strong>：为防止破坏宿主页面布局，<code>position: fixed</code>、<code>z-index</code>、外部 <code>@import</code> 等属性会被安全沙箱自动过滤，并在左下角诊断浮层中给出行号提示。
-                  </li>
-                </ul>
-              </section>
-            </div>
+            <div
+              className="morph-guide-modal-body morph-guide-markdown-doc"
+              data-testid="css-guide-markdown"
+              dangerouslySetInnerHTML={{ __html: cssGuideHtml }}
+            />
 
             <div className="morph-guide-modal-footer">
               <button

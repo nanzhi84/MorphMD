@@ -7,11 +7,13 @@
 
 在微信公众号（`wechat`）实机预览与跨预设排版验收中，暴露出以下 5 项体验与兼容性问题：
 
-1. **行内强调（`em`）与加粗（`strong`）视觉层次微调**：
+1. **行内强调（`em`）与超链接在色彩空间与字形特征上的解耦**：
    - 加粗（`strong`）保持沉稳的深黑/墨色（Anthropic `#141413` / Yoryon `#282828`），避免大面积高饱和亮色破坏阅读节奏；
-   - 斜体（`em`）保持真实的斜体（`font-style: italic`），并采用**偏灰暗的低饱和主题同色系**（Anthropic `--claude-accent-muted: #8C5A4B` 灰调赤陶褐 / Yoryon `--yoryon-muted-fg: #607383` 灰暗石板蓝），温润区分强调语义而不刺眼。
-2. **微信公众号不支持嵌入外部超链接**：
-   - 微信公众号后台不允许普通文章嵌入非微信域名的 `<a href="...">` 外链。在 `wechat` 视图下，外链需直接降级为可读的纯文本/行内文本形式（如 `锚文本 (https://...)`），同时保留原稿完整语义与诊断信息。
+   - 斜体（`em`）彻底剥离品牌的暖色调/主题色相（避免与超链接同色系造成视觉语义混淆），采用与正文同属黑灰中性色阶的微弱明度微调（`#32383F`）；同时由于汉字缺乏原生斜体，浏览器矩阵仿射变换（`skewX`）生成的伪斜体（Oblique）笔画僵硬，因此将 `em` 的字体栈优先指向楷体并配合西文衬线体（`font-family: "LXGW WenKai", "Kaiti SC", "STKaiti", "KaiTi", "Newsreader", Georgia, serif; font-style: normal;`），依靠楷体字形肌理在黑灰正文中形成克制而优雅的强调对比。
+2. **微信公众号外链展开后的主次视觉层级解耦与纯 Web 端底边线修饰**：
+   - 微信公众号后台不允许普通文章嵌入非微信域名的 `<a href="...">` 外链。在 `wechat` 视图下，外链需降级为行内文本形式 `锚文本 (https://...)`；若括号与冗长 URL 继续沿用高饱和度品牌主色，会喧宾夺主并破坏正文灰度（Typographic Gray）均衡；
+   - 因此在 `wechat` 与 `cards`（图文卡片）外链降级转换时，主链接文本保留品牌主色（如 Anthropic `#B85A3A` / Yoryon `#47758f`），而将生成的 ` (URL)` 包装在独立的 `<span class="morph-link-url link-url">` 标签内，赋予低饱和度次级中性灰（`#8C857B`），字号缩小至 `0.85em` 并切换为等宽字体（Monospace）；
+   - 对于保留原生 `<a>` 的 Web 场景，不加箭头伪元素，采用主色文本配合降低不透明度的下划线（`text-decoration: underline; text-decoration-color: rgba(184, 90, 58, 0.35); text-underline-offset: 4px;`）。
 3. **Callout 提示框（如 Yoryon 预设）几何畸变与字体混排割裂**：
    - 当 `.morph-callout` 同时声明四周圆角（`border-radius: 6px`）与单侧粗边框（`border-left: 3px solid`）时，浏览器在计算左边框上下内切圆弧时产生类似括弧的尖角畸变；
    - Yoryon 预设中 Callout 标题使用无衬线体（`13px`），而内部正文却继承了大行距的书刊衬线体（`17px` 宋体，`line-height: 1.85`），导致视觉割裂与松散。
@@ -27,23 +29,27 @@
 
 ## 2. 方案设计与契约 (Design & Contracts)
 
-### 2.1 加粗保持深黑色、斜体保持 `italic` 并采用偏灰暗的主题色（[`src/ui/presets.ts`](../../../src/ui/presets.ts)）
+### 2.1 加粗保持深黑色、斜体（`em`）剥离暖色采用中性深灰 `#32383F` 与楷体字形对比（[`src/ui/presets.ts`](../../../src/ui/presets.ts) & [`src/core/style/inliner.ts`](../../../src/core/style/inliner.ts)）
 
 - **`strong`（加粗）**：
   - `font-weight: 600;`
   - 颜色保持沉稳深黑墨色：Anthropic 预设为 `#141413`，Yoryon 预设为 `var(--yoryon-reading-fg)`（`#282828`）。
-- **`em`（斜体）**：
-  - 保持真实斜体 `font-style: italic;`
-  - 颜色采用**偏灰暗的低饱和主题色**：Anthropic 预设为 `var(--claude-accent-muted)`（`#8C5A4B` 灰调赤陶褐），Yoryon 预设为 `var(--yoryon-muted-fg)`（`#607383` 灰暗石板蓝）。
+- **`em`（强调/斜体）**：
+  - 彻底剥离品牌暖色/强调色相，采用中性深炭灰 `color: #32383F;`；
+  - 字体栈优先指向楷体并取消浏览器合成伪斜体倾斜：`font-family: "LXGW WenKai", "Kaiti SC", "STKaiti", "KaiTi", "Newsreader", Georgia, serif; font-style: normal;`；
+  - 在 [`src/core/wechat/normalizer.ts`](../../../src/core/wechat/normalizer.ts) 的 `#3 font-family` 白名单识别中纳入 `LXGW WenKai`、`Kaiti SC`、`STKaiti`、`KaiTi`。
 
-### 2.2 微信公众号外链转文本呈现契约（[`src/core/wechat/normalizer.ts`](../../../src/core/wechat/normalizer.ts)）
+### 2.2 微信公众号与图文卡片外链分级文本呈现（`.morph-link-text` + `.link-url`）与原生 `<a>` 半透明下划线契约（[`src/core/wechat/normalizer.ts`](../../../src/core/wechat/normalizer.ts)、[`src/core/cards/paginator.ts`](../../../src/core/cards/paginator.ts)、[`src/ui/presets.ts`](../../../src/ui/presets.ts) & [`src/core/style/guard.ts`](../../../src/core/style/guard.ts)）
 
-- 在 `normalizeWeChatStructureAndStyles` 中处理所有 `<a href="...">` 节点：
-  - 若 `href` 为外部链接（即非 `#` 页内锚点，且非 `https://mp.weixin.qq.com` 微信生态内链）：
-    - 将 `<a>` 替换为 `<span class="morph-link-text" data-original-href="...">`；
-    - 若锚文本（`textContent.trim()`）未包含该 URL，则以纯文本形式组合呈现为 `锚文本 (URL)`（例如 `[MorphMD 跨端排版系统](https://morphmd.dev)` 转换为 `<span class="morph-link-text" data-original-href="https://morphmd.dev">MorphMD 跨端排版系统 (https://morphmd.dev)</span>`；若锚文本本身即为该 URL，则直接显示 URL 不重复附加括号）；
-    - 移除误导点击的底边框/下划线，保留主题色或正文可读色彩，并产出 `code: 'structure/wechat-external-link-degraded'`（`severity: 'info'`）诊断项。
-  - `x-article` 与 `cards` 视图继续保留原生 `<a href="...">` 标签。
+- **原生 `<a>` 样式（不添加箭头伪元素）**：
+  - Anthropic 预设：`color: #B85A3A; text-decoration: underline; text-decoration-color: rgba(184, 90, 58, 0.35); text-underline-offset: 4px; border-bottom: none;`；
+  - Yoryon 预设：`color: var(--yoryon-primary); text-decoration: underline; text-decoration-color: rgba(71, 117, 143, 0.35); text-underline-offset: 4px; border-bottom: none;`；
+  - 在 [`src/core/style/guard.ts`](../../../src/core/style/guard.ts) 的 `DEFAULT_ALLOWED_STYLE_PROPS` 中允许 `text-decoration-color` 与 `text-underline-offset`。
+- **微信公众号（`wechat`）与图文卡片（`cards`）外链展开降级及 `.link-url` 视觉降噪**：
+  - 微信公众号不允许外部超链接，而图文卡片导出为静态社交媒体图片同样无法直接点击跳转。因此在 `wechat` 与 `cards` 视图下，若 `href` 为外部链接（非 `#` 页内锚点，且在 `wechat` 下非 `https://mp.weixin.qq.com` 微信生态内链）：
+    - 将 `<a>` 替换为 `<span class="morph-link-text" data-original-href="...">`，保留主链接文本的品牌色（Anthropic `#B85A3A` / Yoryon `#47758f`），并移除下划线与底边框属性（`text-decoration`、`text-decoration-color`、`text-underline-offset`、`border-bottom`）；
+    - 若锚文本（`textContent.trim()`）未包含该 URL，则将追加的 ` (URL)` 包装在独立的 `<span class="morph-link-url link-url">` 子节点内，显式内联次级中性灰 `color: #8C857B;`、缩小字号 `font-size: 0.85em;`、等宽字体栈 `font-family: "JetBrains Mono", "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;` 与 `font-weight: 400; font-style: normal;`；在 `wechat` 下产出 `code: 'structure/wechat-external-link-degraded'`（`severity: 'info'`）诊断项。
+  - `x-article` 视图继续保留原生 `<a href="...">` 标签。
 
 ### 2.3 Callout 现代几何切边与统一无衬线排版（[`src/ui/presets.ts`](../../../src/ui/presets.ts) & [`src/core/style/inliner.ts`](../../../src/core/style/inliner.ts)）
 
@@ -86,13 +92,23 @@
    - 正文字号调整为兼顾桌面与手机阅读的 `15px`（行高 `1.75`，段落底边距 `16px`）；引用块 `15px`（行高 `1.7`，底边距 `20px`）；Callout 底边距 `16px`；
    - 表格 `.morph-table` 字号调整为 `13px`，单元格 `th`/`td` 内边距优化为 `8px 6px`，表格内行内代码 `.morph-table :not(pre) > code` 字号设为 `12px`、`padding: 1px 4px`、`white-space: normal; word-break: break-word;`，消除手机窄屏下四列表格单字竖排与括号断行。
 
+### 2.6 X 长文复杂块浏览器端高清 Canvas 光栅化与《自定义 CSS 编写指南》纯竖向 Markdown 文档化（[`src/core/x-article/normalizer.ts`](../../../src/core/x-article/normalizer.ts)、[`src/ui/custom-css-guide.md`](../../../src/ui/custom-css-guide.md) & [`src/App.tsx`](../../../src/App.tsx)）
+
+1. **X 长文（`x-article`）复杂块（`table`、`math`、`svg`）高清 Canvas 2D 光栅化渲染**：
+   - 在真实浏览器预览与快照生成环境中（当 `HTMLCanvasElement.prototype.getContext('2d')` 可用时），摒弃原先的 5x10 像素色块占位图，使用高分屏（2x Retina）Canvas 2D 直接绘制真实可读的成品位图（`data:image/png;base64,...`）：
+     - **表格（`table`）**：提取表头 `th` 与单元格 `td` 的真实文本与行内 `<code>` 节点，按列宽自动折行排版，绘制清晰的表头暖灰底色（`#F5F4F0`）、单元格边框线（`#E2DFD7`）、行内代码胶囊底色以及真实的中英文字体；
+     - **数学公式（`math`）**：通过 MathJax 将 LaTeX 公式编译为自包含矢量路径（`SVG` `path` + `rect`），在 Canvas 2D 中通过 `Path2D` 递归应用 `transform`（`translate` / `scale` / `matrix`）进行高清矢量光栅化，并为行内公式标记 `data-math-display="inline"`（在预览舞台中保持行内对齐）、块级公式标记 `data-math-display="block"`（块级居中展示）；
+     - **无头 JSDOM 回退**：在无 Canvas 2D 上下文的纯 JSDOM 环境中自动回退至纯 JS PNG 编码器，兼顾毫秒级测试执行与 `verifyXArticleHtml` 契约校验。
+2. **《自定义 CSS 编写指南》弹窗改为标准竖向 Markdown 文档排版**：
+   - 移除原有的多列横向选择器网格卡片（`.morph-guide-selector-grid`、`.morph-guide-token-list`），将指南内容抽离为独立的标准竖向 Markdown 文件 [`src/ui/custom-css-guide.md`](../../../src/ui/custom-css-guide.md)，并在弹窗（`data-testid="css-guide-modal"`）中通过 `compileMarkdownSync` 直接渲染为单栏纵向技术文档流。
+
 ---
 
 ## 3. 真实执行与验收标准 (Verification)
 
 ### 3.1 实施与验收 Checklist
 
-- [x] 由独立子代理（Fresh Subagent）严格依据本 Spec 编写/更新黑盒回归测试（覆盖 `strong` 深黑与 `em` 灰暗主题色斜体、微信外链转文本呈现、Callout 与普通引用块 `.morph-quote` 纯行内 `<span>`+`<br>` 原生 `<p>` 结构且无 `<blockquote>` 双左线阴影及上下零空行、`.morph-p` 与 `li > section` 显式字号/行高/边距内联、预览与模拟微信宿主（剥离 `.morph-doc` 及 `<ol>`/`<li>` 样式后）的逐块高度与间距 1:1 同构、移动端 375px 视口代码块零折行/零拉伸及表格紧凑排版），并在实现前确认红灯失败（TDD Red Phase）。
+- [x] 由独立子代理（Fresh Subagent）严格依据本 Spec 编写/更新黑盒回归测试（覆盖 `strong` 深黑与 `em` 中性深灰 `#32383F` + 楷体 `font-style: normal`、微信外链转文本呈现 `.morph-link-text` + `.link-url` 次级中性灰 `#8C857B` / `0.85em` 等宽字体、Callout 与普通引用块 `.morph-quote` 纯行内 `<span>`+`<br>` 原生 `<p>` 结构且无 `<blockquote>` 双左线阴影及上下零空行、`.morph-p` 与 `li > section` 显式字号/行高/边距内联、预览与模拟微信宿主（剥离 `.morph-doc` 及 `<ol>`/`<li>` 样式后）的逐块高度与间距 1:1 同构、移动端 375px 视口代码块零折行/零拉伸及表格紧凑排版），并在实现前确认红灯失败（TDD Red Phase）。
 - [x] 更新 [`src/ui/presets.ts`](../../../src/ui/presets.ts)、[`src/core/style/inliner.ts`](../../../src/core/style/inliner.ts) 与 [`src/styles/workbench.css`](../../../src/styles/workbench.css)，落地 `.morph-p`、`.morph-quote .morph-p` 与 `.morph-list li` 显式字体/字号/字色声明、标题与 Callout 间距层级及 `.morph-doc` 块级流同构。
 - [x] 更新 [`src/core/ast/compiler.ts`](../../../src/core/ast/compiler.ts)、[`src/core/ast/math-code.ts`](../../../src/core/ast/math-code.ts)、[`src/core/selection/normalizer.ts`](../../../src/core/selection/normalizer.ts) 与 [`src/core/wechat/normalizer.ts`](../../../src/core/wechat/normalizer.ts)，落地 Callout 与普通引用块纯行内子节点 `<p class="morph-callout">` / `<p class="morph-quote">` 转换、`li > section` 排版与底边距下沉内联及跨块间距同构。
 - [x] 通过全量黑盒测试套件、微信官方结构校验器（`verify-article-structure-spec`）、375px 手机视口与 585px 预览-微信宿主对比 Playwright 真实渲染验收、`npm run typecheck` 与 `harness doctor`。

@@ -338,7 +338,8 @@ describe('TestWorkbenchLayoutAndTheme', () => {
 describe('TestTargetSwitchingAndCardsReflow', () => {
   it('test_switching_target_tabs_updates_aria_pressed_preview_stage_adapter_status_and_primary_cta', async () => {
     const { container } = await mountWorkbench({
-      initialMarkdown: '# 跨端同构发布\n\n支持公众号、X 长文与多比例卡片。',
+      initialMarkdown:
+        '# 跨端同构发布\n\n支持公众号、X 长文与 [MorphMD 卡片](https://morphmd.dev)。',
     });
 
     const wechatTab = getByTestId(container, 'target-tab-wechat');
@@ -358,6 +359,7 @@ describe('TestTargetSwitchingAndCardsReflow', () => {
     expect(wechatTab.getAttribute('aria-pressed')).toBe('false');
     expect(previewStage.getAttribute('data-target-view')).toBe('x-article');
     expect(primaryBtn.textContent).toContain('复制富文本');
+    expect(previewStage.querySelector('a[href="https://morphmd.dev"]')).not.toBeNull();
 
     await clickTestId(container, 'target-tab-cards');
     expect(cardsTab.getAttribute('aria-pressed')).toBe('true');
@@ -365,6 +367,15 @@ describe('TestTargetSwitchingAndCardsReflow', () => {
     expect(previewStage.getAttribute('data-target-view')).toBe('cards');
     expect(primaryBtn.textContent).toContain('导出高清卡片');
     expect(previewStage.querySelectorAll('.morph-card-page').length).toBeGreaterThanOrEqual(1);
+    expect(previewStage.querySelector('.morph-card-page a[href="https://morphmd.dev"]')).toBeNull();
+    const cardLinkText = previewStage.querySelector<HTMLElement>(
+      '.morph-card-page .morph-link-text[data-original-href="https://morphmd.dev"]'
+    );
+    expect(cardLinkText).not.toBeNull();
+    expect(cardLinkText!.textContent).toBe('MorphMD 卡片 (https://morphmd.dev)');
+    const cardLinkUrl = cardLinkText!.querySelector<HTMLElement>('.morph-link-url.link-url');
+    expect(cardLinkUrl).not.toBeNull();
+    expect(cardLinkUrl!.textContent).toBe(' (https://morphmd.dev)');
   });
 
   it('test_changing_canvas_preset_in_cards_view_reflows_card_pages_across_all_aspect_ratios', async () => {
@@ -660,16 +671,27 @@ describe('TestStyleDrawerCustomization', () => {
 
     const em = previewStage.querySelector<HTMLElement>('p em');
     expect(em).not.toBeNull();
-    expect(em!.style.fontStyle).toBe('italic');
+    expect(em!.style.fontStyle).toBe('normal');
+    expect(em!.style.fontFamily).toContain('LXGW WenKai');
+    expect(em!.style.fontFamily).toContain('Kaiti SC');
     expect(['', 'none']).toContain(em!.style.borderBottom || em!.style.borderBottomStyle || '');
-    expect(em!.style.color.toLowerCase()).toMatch(/#8c5a4b|rgb\(140,\s*90,\s*75\)/);
+    expect(em!.style.color.toLowerCase()).toMatch(/#32383f|rgb\(50,\s*56,\s*63\)/);
 
     expect(previewStage.querySelector('p a')).toBeNull();
     const linkText = previewStage.querySelector<HTMLElement>('p .morph-link-text');
     expect(linkText).not.toBeNull();
     expect(linkText!.getAttribute('data-original-href')).toBe('https://anthropic.com');
     expect(linkText!.textContent).toBe('Anthropic Research (https://anthropic.com)');
-    expect(linkText!.style.color.toLowerCase()).toMatch(/#c86446|rgb\(200,\s*100,\s*70\)/);
+    expect(linkText!.style.color.toLowerCase()).toMatch(
+      /#b85a3a|#c86446|rgb\(184,\s*90,\s*58\)|rgb\(200,\s*100,\s*70\)/
+    );
+    const linkUrl = linkText!.querySelector<HTMLElement>('.morph-link-url.link-url');
+    expect(linkUrl).not.toBeNull();
+    expect(linkUrl!.tagName).toBe('SPAN');
+    expect(linkUrl!.textContent).toBe(' (https://anthropic.com)');
+    expect(linkUrl!.style.color.toLowerCase()).toMatch(/#8c857b|rgb\(140,\s*133,\s*123\)/);
+    expect(linkUrl!.style.fontSize).toMatch(/^(0\.85em|12\.75px)$/i);
+    expect(linkUrl!.style.fontFamily).toMatch(/JetBrains Mono|SF Mono|monospace/i);
 
     const quote = previewStage.querySelector<HTMLElement>('.morph-quote');
     expect(quote).not.toBeNull();
@@ -842,8 +864,13 @@ describe('TestStyleDrawerCustomization', () => {
 
     await clickTestId(container, 'toggle-css-guide-btn');
     const guideModal = getByTestId(container, 'css-guide-modal');
+    const guideMarkdown = getByTestId(guideModal, 'css-guide-markdown');
+    expect(guideMarkdown).toBeTruthy();
     expect(guideModal.textContent).toContain('.morph-h2');
     expect(guideModal.textContent).toContain('.morph-quote');
+    expect(guideModal.textContent).toContain('--morph-accent');
+    expect(guideModal.querySelector('.morph-guide-selector-grid')).toBeNull();
+    expect(guideModal.querySelector('.morph-guide-selector-card')).toBeNull();
     await clickTestId(container, 'close-css-guide-modal-btn');
     expect(isPanelVisible(container, 'css-guide-modal')).toBe(false);
 
@@ -945,7 +972,7 @@ describe('TestStyleDrawerCustomization', () => {
         expect(sec.style.marginBottom).toBe(i === liSections.length - 1 ? '16px' : '6px');
       }
 
-      // d) strong keeps deep ink (#282828) and em keeps italic with muted slate-blue (#607383)
+      // d) strong keeps deep ink (#282828) and em uses neutral charcoal (#32383F) + Kaiti serif stack (font-style: normal)
       const strong = root.querySelector<HTMLElement>('p strong');
       expect(strong).not.toBeNull();
       expect(strong!.style.fontWeight).toBe('600');
@@ -953,8 +980,10 @@ describe('TestStyleDrawerCustomization', () => {
 
       const em = root.querySelector<HTMLElement>('p em');
       expect(em).not.toBeNull();
-      expect(em!.style.fontStyle).toBe('italic');
-      expect(em!.style.color.toLowerCase()).toMatch(/#607383|rgb\(96,\s*115,\s*131\)/);
+      expect(em!.style.fontStyle).toBe('normal');
+      expect(em!.style.fontFamily).toContain('LXGW WenKai');
+      expect(em!.style.fontFamily).toContain('Kaiti SC');
+      expect(em!.style.color.toLowerCase()).toMatch(/#32383f|rgb\(50,\s*56,\s*63\)/);
 
       // e) p.morph-quote slate-blue left border & ink (native <p> with inline <span class="morph-p">)
       const quote = root.querySelector<HTMLElement>('.morph-quote');
@@ -979,13 +1008,20 @@ describe('TestStyleDrawerCustomization', () => {
       expect(quotePara!.style.lineHeight).toBe('1.7');
       expect(quotePara!.style.color.toLowerCase()).toMatch(/#253947|rgb\(37,\s*57,\s*71\)/);
 
-      // f) external link degraded to .morph-link-text in wechat target with color #47758f
+      // f) external link degraded to .morph-link-text in wechat target with color #47758f and .link-url secondary muted gray
       expect(root.querySelector('p a')).toBeNull();
       const linkText = root.querySelector<HTMLElement>('p .morph-link-text');
       expect(linkText).not.toBeNull();
       expect(linkText!.getAttribute('data-original-href')).toBe('https://morphmd.dev');
       expect(linkText!.textContent).toBe('MorphMD 跨端排版系统 (https://morphmd.dev)');
       expect(linkText!.style.color.toLowerCase()).toMatch(/#47758f|rgb\(71,\s*117,\s*143\)/);
+      const linkUrl = linkText!.querySelector<HTMLElement>('.morph-link-url.link-url');
+      expect(linkUrl).not.toBeNull();
+      expect(linkUrl!.tagName).toBe('SPAN');
+      expect(linkUrl!.textContent).toBe(' (https://morphmd.dev)');
+      expect(linkUrl!.style.color.toLowerCase()).toMatch(/#8c857b|rgb\(140,\s*133,\s*123\)/);
+      expect(linkUrl!.style.fontSize).toMatch(/^(0\.85em|12\.75px)$/i);
+      expect(linkUrl!.style.fontFamily).toMatch(/JetBrains Mono|SF Mono|monospace/i);
 
       // g) Callout modern left-straight right-rounded geometry & native <p> with inline <span>+<br>
       const callout = root.querySelector<HTMLElement>('.morph-callout');

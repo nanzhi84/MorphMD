@@ -1,8 +1,10 @@
 import { chromium, type Browser, type Page } from 'playwright';
+import { build as viteBuild } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   AssetStore,
   buildDeliverySnapshot,
+  compileMarkdown,
 } from '../src/index';
 import {
   buildDefaultShowcaseMarkdown,
@@ -895,14 +897,95 @@ describe('TestWeChatPipeline', () => {
         inValidInfo: {},
       });
 
-      // 2. External link diagnostic emitted in WeChat, while x-article and cards keep <a href="https://morphmd.dev">
+      // 2. External link diagnostic emitted in WeChat; x-article keeps native <a href="https://morphmd.dev"> while cards expands external link into .morph-link-text + .morph-link-url.link-url
       expect(
         anthropicSnap.diagnostics.some(
           (d) => d.code === 'structure/wechat-external-link-degraded' && d.severity === 'info'
         )
       ).toBe(true);
       expect(xArticleSnap.html).toContain('href="https://morphmd.dev"');
-      expect(cardsSnap.html).toContain('href="https://morphmd.dev"');
+      expect(cardsSnap.html).not.toContain('<a ');
+      expect(cardsSnap.html).not.toContain('↗');
+      const cardsLinkStyle = await page.evaluate((html) => {
+        const container = document.createElement('div');
+        container.innerHTML = html;
+        const linkText = container.querySelector(
+          '.morph-link-text[data-original-href="https://morphmd.dev"]'
+        ) as HTMLElement | null;
+        const linkUrl = linkText?.querySelector('.morph-link-url.link-url') as HTMLElement | null;
+        return {
+          exists: linkText !== null,
+          color: (linkText?.style.color || '').toLowerCase(),
+          textDecoration: linkText?.style.textDecoration || linkText?.style.textDecorationLine || '',
+          text: linkText?.textContent || '',
+          urlTag: linkUrl?.tagName || '',
+          urlText: linkUrl?.textContent || '',
+          urlColor: (linkUrl?.style.color || '').toLowerCase(),
+          urlFontSize: linkUrl?.style.fontSize || '',
+          urlFontFamily: linkUrl?.style.fontFamily || '',
+        };
+      }, cardsSnap.html);
+      expect(cardsLinkStyle.exists).toBe(true);
+      expect(cardsLinkStyle.color).toMatch(
+        /#b85a3a|#c86446|rgb\(184,\s*90,\s*58\)|rgb\(200,\s*100,\s*70\)/
+      );
+      expect(['', 'none']).toContain(cardsLinkStyle.textDecoration);
+      expect(cardsLinkStyle.text).toBe('MorphMD 跨端排版系统 (https://morphmd.dev)');
+      expect(cardsLinkStyle.urlTag).toBe('SPAN');
+      expect(cardsLinkStyle.urlText).toBe(' (https://morphmd.dev)');
+      expect(cardsLinkStyle.urlColor).toMatch(/#8c857b|rgb\(140,\s*133,\s*123\)/);
+      expect(cardsLinkStyle.urlFontSize).toMatch(/^(0\.85em|12\.75px)$/i);
+      expect(cardsLinkStyle.urlFontFamily).toMatch(/JetBrains Mono|SF Mono|monospace/i);
+
+      // 2b. Verify x-article in real Chromium browser DOM: Canvas 2D high-DPI table & math rasterization and inline/block math display distinction
+      const rawCompiled = await compileMarkdown(markdown);
+      const xNormalizerBundle = await viteBuild({
+        configFile: false,
+        logLevel: 'silent',
+        build: {
+          write: false,
+          lib: {
+            entry: 'src/core/x-article/normalizer.ts',
+            name: 'MorphXNormalizer',
+            formats: ['iife'],
+          },
+        },
+      });
+      const xNormalizerCode = (xNormalizerBundle as any)[0].output[0].code as string;
+      const xBrowserRaster = await page.evaluate(
+        ({ rawHtml, bundleCode }) => {
+          const scriptEl = document.createElement('script');
+          scriptEl.textContent = bundleCode;
+          document.head.appendChild(scriptEl);
+          const container = document.createElement('div');
+          container.innerHTML = rawHtml;
+          const diags: unknown[] = [];
+          (window as any).MorphXNormalizer.normalizeXArticleStructureAndStyles(container, diags);
+          const tableImg = container.querySelector(
+            'img[data-raster-type="table"]'
+          ) as HTMLImageElement | null;
+          const mathImgs = Array.from(
+            container.querySelectorAll('img[data-raster-type="math"]')
+          ) as HTMLImageElement[];
+          return {
+            tableCanvasRasterized: tableImg?.getAttribute('data-canvas-rasterized') || '',
+            tableSrc: tableImg?.getAttribute('src') || '',
+            mathDisplays: mathImgs.map((img) => img.getAttribute('data-math-display') || ''),
+            mathCanvasRasterized: mathImgs.map(
+              (img) => img.getAttribute('data-canvas-rasterized') || ''
+            ),
+          };
+        },
+        { rawHtml: rawCompiled.html, bundleCode: xNormalizerCode }
+      );
+      expect(xBrowserRaster.tableCanvasRasterized).toBe('true');
+      expect(xBrowserRaster.tableSrc).toMatch(/^data:image\/png;base64,/);
+      const decodedTablePng = await decodeBitmapDataUrl(page, xBrowserRaster.tableSrc);
+      expect(decodedTablePng.decoded).toBe(true);
+      expect(decodedTablePng.width).toBeGreaterThanOrEqual(680);
+      expect(xBrowserRaster.mathDisplays).toContain('inline');
+      expect(xBrowserRaster.mathDisplays).toContain('block');
+      expect(xBrowserRaster.mathCanvasRasterized).toEqual(['true', 'true']);
 
       // 3. Even with empty customCss (""), Callout and Quote in WeChat retain baseline styles and native <p> with inline <span>+<br> (zero block descendants)
       const emptyCalloutCheck = await page.evaluate((html) => {
@@ -1002,6 +1085,7 @@ describe('TestWeChatPipeline', () => {
           const em = root.querySelector('p em') as HTMLElement;
           const externalAnchors = root.querySelectorAll('a[href^="http"]');
           const linkText = root.querySelector('.morph-link-text') as HTMLElement | null;
+          const linkUrl = linkText?.querySelector('.morph-link-url.link-url') as HTMLElement | null;
 
           const quote = root.querySelector('.morph-quote') as HTMLElement;
           const quotePara = quote?.querySelector('.morph-p') as HTMLElement | null;
@@ -1087,9 +1171,16 @@ describe('TestWeChatPipeline', () => {
             strongColor: strong.style.color.toLowerCase(),
             emStyle: em.style.fontStyle,
             emColor: em.style.color.toLowerCase(),
+            emFontFamily: em.style.fontFamily,
             externalAnchorCount: externalAnchors.length,
             linkTextHref: linkText?.getAttribute('data-original-href') || '',
             linkTextContent: linkText?.textContent || '',
+            linkTextColor: (linkText?.style.color || '').toLowerCase(),
+            linkUrlTag: linkUrl?.tagName || '',
+            linkUrlText: linkUrl?.textContent || '',
+            linkUrlColor: (linkUrl?.style.color || '').toLowerCase(),
+            linkUrlFontSize: linkUrl?.style.fontSize || '',
+            linkUrlFontFamily: linkUrl?.style.fontFamily || '',
             legacyBlockquoteCount,
             quoteTag: quote?.tagName || '',
             quoteBlockDescendantCount:
@@ -1182,18 +1273,28 @@ describe('TestWeChatPipeline', () => {
         expect(mobileAudit.gapBelowH3).toBeGreaterThanOrEqual(11);
 
         expect(mobileAudit.strongWeight).toBe('600');
-        expect(mobileAudit.emStyle).toBe('italic');
+        expect(mobileAudit.emStyle).toBe('normal');
+        expect(mobileAudit.emColor).toMatch(/#32383f|rgb\(50,\s*56,\s*63\)/);
+        expect(mobileAudit.emFontFamily).toContain('LXGW WenKai');
+        expect(mobileAudit.emFontFamily).toContain('Kaiti SC');
         if (presetId === 'default') {
           expect(mobileAudit.strongColor).toMatch(/#141413|rgb\(20,\s*20,\s*19\)/);
-          expect(mobileAudit.emColor).toMatch(/#8c5a4b|rgb\(140,\s*90,\s*75\)/);
+          expect(mobileAudit.linkTextColor).toMatch(
+            /#b85a3a|#c86446|rgb\(184,\s*90,\s*58\)|rgb\(200,\s*100,\s*70\)/
+          );
         } else {
           expect(mobileAudit.strongColor).toMatch(/#282828|rgb\(40,\s*40,\s*40\)/);
-          expect(mobileAudit.emColor).toMatch(/#607383|rgb\(96,\s*115,\s*131\)/);
+          expect(mobileAudit.linkTextColor).toMatch(/#47758f|rgb\(71,\s*117,\s*143\)/);
         }
 
         expect(mobileAudit.externalAnchorCount).toBe(0);
         expect(mobileAudit.linkTextHref).toBe('https://morphmd.dev');
         expect(mobileAudit.linkTextContent).toBe('MorphMD 跨端排版系统 (https://morphmd.dev)');
+        expect(mobileAudit.linkUrlTag).toBe('SPAN');
+        expect(mobileAudit.linkUrlText).toBe(' (https://morphmd.dev)');
+        expect(mobileAudit.linkUrlColor).toMatch(/#8c857b|rgb\(140,\s*133,\s*123\)/);
+        expect(mobileAudit.linkUrlFontSize).toMatch(/^(0\.85em|12\.75px)$/i);
+        expect(mobileAudit.linkUrlFontFamily).toMatch(/JetBrains Mono|SF Mono|monospace/i);
 
         // Quote native <p class="morph-quote"> with inline <span class="morph-p"> (eliminates .js_blockquote_wrap double left-border shadow)
         expect(mobileAudit.legacyBlockquoteCount).toBe(0);
