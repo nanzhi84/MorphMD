@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { compileMarkdown, compileMarkdownSync, HeavyBlockCache } from '../src/core/ast';
-import { documentOf, evidence } from './support/contracts';
+import { serializeFullSnapshot } from '../src/core/selection';
+import { buildDeliverySnapshot } from '../src/core/snapshot';
+import { assetStore, documentOf, evidence } from './support/contracts';
+import { verifyWeChatArticleHtml } from './verifiers/wechat/index';
+import { verifyXArticleHtml, verifyXArticleStructure } from './verifiers/x-article/index';
 
 describe('TestAstPipeline', () => {
   it('test_rich_markdown_preserves_semantic_blocks_and_source_locations', async () => {
@@ -236,6 +240,80 @@ describe('TestAstPipeline', () => {
       expect(fifthNextEl!.classList.contains('morph-caption')).toBe(false);
       expect(fifthNextEl!.textContent?.trim()).toBe('这是一段普通的正文段落，不应该被误判为图注。');
     }
+  });
+
+  it('test_extra_blank_lines_between_blocks_preserve_proportional_spacing_and_plain_text_gaps', async () => {
+    const source = '第一段\n\n第二段\n\n\n第三段\n\n\n\n第四段';
+    const asyncAst = await compileMarkdown(source);
+    const syncAst = compileMarkdownSync(source);
+
+    for (const html of [asyncAst.html, syncAst.html]) {
+      const doc = documentOf(html);
+      const paragraphs = [...doc.querySelectorAll<HTMLElement>('p.morph-p')];
+      expect(paragraphs).toHaveLength(4);
+      expect(paragraphs[0]!.textContent).toBe('第一段');
+      expect(paragraphs[0]!.getAttribute('data-extra-blank-lines')).toBeNull();
+      expect(paragraphs[1]!.textContent).toBe('第二段');
+      expect(paragraphs[1]!.getAttribute('data-extra-blank-lines')).toBe('1');
+      expect(paragraphs[2]!.textContent).toBe('第三段');
+      expect(paragraphs[2]!.getAttribute('data-extra-blank-lines')).toBe('2');
+      expect(paragraphs[3]!.textContent).toBe('第四段');
+      expect(paragraphs[3]!.getAttribute('data-extra-blank-lines')).toBeNull();
+    }
+
+    const store = assetStore();
+    const wechatSnapshot = await buildDeliverySnapshot(source, 'wechat', store);
+    const cardsSnapshot = await buildDeliverySnapshot(source, 'cards', store);
+    const xArticleSnapshot = await buildDeliverySnapshot(source, 'x-article', store);
+
+    for (const [targetName, snap] of [
+      ['wechat', wechatSnapshot],
+      ['cards', cardsSnapshot],
+    ] as const) {
+      const doc = documentOf(snap.html);
+      const paras = [...doc.querySelectorAll<HTMLElement>('p.morph-p')];
+      expect(paras.length, `${targetName} paragraph count`).toBe(4);
+
+      const mb0 = parseFloat(paras[0]!.style.marginBottom);
+      const mb1 = parseFloat(paras[1]!.style.marginBottom);
+      const mb2 = parseFloat(paras[2]!.style.marginBottom);
+
+      expect(paras[0]!.style.marginBottom).toMatch(/px$/i);
+      expect(paras[1]!.style.marginBottom).toMatch(/px$/i);
+      expect(paras[2]!.style.marginBottom).toMatch(/px$/i);
+      expect(mb1).toBeGreaterThan(mb0);
+      expect(mb2).toBeGreaterThan(mb1);
+      expect(mb2 - mb1).toBeCloseTo(mb1 - mb0, 1);
+    }
+
+    const wechatVerify = await verifyWeChatArticleHtml(wechatSnapshot.html);
+    expect(wechatVerify.isValid).toBe(true);
+    expect(wechatVerify.inValidInfo).toEqual({});
+
+    const xDoc = documentOf(xArticleSnapshot.html);
+    const xVerifyStruct = verifyXArticleStructure(xDoc.body);
+    const xVerifyHtml = verifyXArticleHtml(xArticleSnapshot.html);
+    expect(xVerifyStruct.isValid).toBe(true);
+    expect(xVerifyStruct.inValidInfo).toEqual({});
+    expect(xVerifyHtml.isValid).toBe(true);
+    expect(xVerifyHtml.inValidInfo).toEqual({});
+    expect(
+      [...xDoc.querySelectorAll('p')].every((p) => (p.textContent || '').trim().length > 0 || p.querySelector('img'))
+    ).toBe(true);
+
+    const serialized = serializeFullSnapshot(wechatSnapshot, store);
+    expect(serialized.plainText).toContain('第一段\n\n第二段\n\n\n第三段\n\n\n\n第四段');
+
+    evidence('ast-extra-blank-lines', {
+      source,
+      asyncHtml: asyncAst.html,
+      wechatHtml: wechatSnapshot.html,
+      cardsHtml: cardsSnapshot.html,
+      xArticleHtml: xArticleSnapshot.html,
+      plainText: serialized.plainText,
+      wechatVerify,
+      xVerifyStruct: { isValid: xVerifyStruct.isValid, inValidInfo: xVerifyStruct.inValidInfo },
+    });
   });
 });
 

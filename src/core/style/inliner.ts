@@ -730,6 +730,71 @@ ${tokenCssLines}
       }
     }
 
+    // 3.42 Apply proportional margin-bottom spacing for extra blank lines between blocks
+    const allowsMarginBottom =
+      !capabilities.allowedStyleProps ||
+      capabilities.allowedStyleProps.size === 0 ||
+      capabilities.allowedStyleProps.has('margin-bottom');
+    if (allowsMarginBottom) {
+      const parseLengthPx = (raw: string, refFontSizePx: number, fallbackPx: number): number => {
+        const trimmed = (raw || '').trim().toLowerCase();
+        if (!trimmed) return fallbackPx;
+        const num = parseFloat(trimmed);
+        if (!Number.isFinite(num)) return fallbackPx;
+        if (trimmed.endsWith('rem')) return num * 16;
+        if (trimmed.endsWith('em')) return num * refFontSizePx;
+        return num;
+      };
+
+      const rootFsRaw = rootContainer.style.getPropertyValue('font-size');
+      const rootFsPx = parseLengthPx(rootFsRaw, 16, 16);
+      const rootLhRaw = rootContainer.style.getPropertyValue('line-height');
+      const extraBlankEls = Array.from(
+        rootContainer.querySelectorAll<HTMLElement>('[data-extra-blank-lines]')
+      );
+      if (extraBlankEls.length > 0) {
+        for (const blockEl of Array.from(
+          rootContainer.querySelectorAll<HTMLElement>('[style*="margin-bottom"]')
+        )) {
+          const mbRaw = blockEl.style.getPropertyValue('margin-bottom').trim().toLowerCase();
+          if (mbRaw.endsWith('rem') || mbRaw.endsWith('em')) {
+            const fsRaw = blockEl.style.getPropertyValue('font-size') || rootFsRaw;
+            const fsPx = parseLengthPx(fsRaw, rootFsPx, rootFsPx);
+            const mbPx = Math.round(parseLengthPx(mbRaw, fsPx, 16));
+            blockEl.style.setProperty('margin-bottom', `${mbPx}px`);
+          }
+        }
+      }
+
+      for (const el of extraBlankEls) {
+        const extraLines = parseInt(el.getAttribute('data-extra-blank-lines') || '0', 10);
+        if (!Number.isFinite(extraLines) || extraLines <= 0) continue;
+
+        const fsRaw = el.style.getPropertyValue('font-size') || rootFsRaw;
+        const fsPx = parseLengthPx(fsRaw, rootFsPx, 15);
+
+        const baseMbRaw = el.style.getPropertyValue('margin-bottom');
+        const baseMb = parseLengthPx(baseMbRaw, fsPx, 16);
+
+        const lhRaw = (el.style.getPropertyValue('line-height') || rootLhRaw || '').trim();
+        let lineHeightPx = Math.round(fsPx * 1.75);
+        if (lhRaw.endsWith('px') || lhRaw.endsWith('rem') || lhRaw.endsWith('em')) {
+          const parsedPx = parseLengthPx(lhRaw, fsPx, lineHeightPx);
+          if (Number.isFinite(parsedPx) && parsedPx > 0) {
+            lineHeightPx = Math.round(parsedPx);
+          }
+        } else if (lhRaw) {
+          const parsedMult = parseFloat(lhRaw);
+          if (Number.isFinite(parsedMult) && parsedMult > 0) {
+            lineHeightPx = Math.round(fsPx * parsedMult);
+          }
+        }
+
+        const nextMb = Math.round(baseMb + extraLines * lineHeightPx);
+        el.style.setProperty('margin-bottom', `${nextMb}px`);
+      }
+    }
+
     // 3.45 WeChat article structure & style compliance guard (wechatjs/verify-article-structure-spec)
     // and social media cards external link expansion
     if (capabilities.targetId === 'wechat') {

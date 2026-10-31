@@ -518,6 +518,55 @@ function transformImageCaptions(tree: Root): void {
   }
 }
 
+function annotateExtraBlankLinesInContainer(children: Root['children'], markdown: string): void {
+  const elements = children.filter((child): child is Element => child.type === 'element');
+  for (const el of elements) {
+    if (Array.isArray(el.children) && el.children.length > 0) {
+      if (el.tagName === 'blockquote' || el.tagName === 'div') {
+        annotateExtraBlankLinesInContainer(el.children as Root['children'], markdown);
+      }
+    }
+  }
+
+  for (let i = 0; i < elements.length - 1; i++) {
+    const prevEl = elements[i];
+    const nextEl = elements[i + 1];
+    const prevEnd = prevEl.position?.end;
+    const nextStart = nextEl.position?.start;
+    if (!prevEnd || !nextStart) continue;
+
+    let extraBlankLines = 0;
+    if (
+      typeof prevEnd.offset === 'number' &&
+      typeof nextStart.offset === 'number' &&
+      nextStart.offset > prevEnd.offset
+    ) {
+      const gapSlice = markdown.slice(prevEnd.offset, nextStart.offset);
+      const lines = gapSlice.split(/\r?\n/);
+      const middleLines = lines.slice(1, -1);
+      const isPureBlankOrQuoteGap =
+        middleLines.length >= 2 && middleLines.every((line) => /^[ \t\u3000]*>?[ \t\u3000]*$/.test(line));
+      if (isPureBlankOrQuoteGap) {
+        const newlineCount = lines.length - 1;
+        extraBlankLines = Math.max(0, newlineCount - 2);
+      }
+    } else if (nextStart.line - prevEnd.line >= 3) {
+      extraBlankLines = nextStart.line - prevEnd.line - 2;
+    }
+
+    if (extraBlankLines > 0) {
+      const props = (prevEl.properties || (prevEl.properties = {})) as Record<string, unknown>;
+      props.dataExtraBlankLines = String(extraBlankLines);
+    }
+  }
+}
+
+function annotateExtraBlankLines(tree: Root, markdown: string): void {
+  if (Array.isArray(tree.children)) {
+    annotateExtraBlankLinesInContainer(tree.children, markdown);
+  }
+}
+
 const BASE_PROCESSOR = unified()
   .use(remarkParse)
   .use(remarkGfm)
@@ -551,6 +600,9 @@ function runCompile(
 
   // 3.5. Transform Notion-style image captions
   transformImageCaptions(rawHast);
+
+  // 3.6. Annotate extra blank lines between blocks
+  annotateExtraBlankLines(rawHast, markdown);
 
   // 4. Map semantic classes & images
   visit(rawHast, 'element', (node: Element) => {

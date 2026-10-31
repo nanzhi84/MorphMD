@@ -2355,4 +2355,225 @@ describe('class TestWorkbenchUi', () => {
 
     xDom.window.close();
   });
+
+  it('test_editor_textarea_undo_and_redo_keyboard_shortcuts_revert_and_restore_markdown_and_preview', async () => {
+    const store = assetStore();
+    const initialMarkdown = '# 快捷键撤销重做测试\n\n第一段原始已提交正文。';
+    const editedMarkdown = '# 快捷键撤销重做测试\n\n第一段原始已提交正文。\n\n第二段刚输入尚未触发防抖的新段落。';
+
+    const session = createEditorSession({
+      assetStore: store,
+      initialMarkdown,
+      debounceMs: 250,
+    });
+
+    const { container } = await mountWorkbench({
+      session,
+      assetStore: store,
+      debounceMs: 250,
+    });
+
+    const markdownInput = getByTestId<HTMLTextAreaElement>(container, 'markdown-input');
+    const previewStage = getByTestId(container, 'preview-stage');
+
+    expect(markdownInput.value).toBe(initialMarkdown);
+    expect(previewStage.textContent).toContain('第一段原始已提交正文。');
+
+    // Type into textarea without waiting for the 250ms debounce timer
+    await act(async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value'
+      );
+      if (descriptor?.set) {
+        descriptor.set.call(markdownInput, editedMarkdown);
+      } else {
+        markdownInput.value = editedMarkdown;
+      }
+      markdownInput.dispatchEvent(new window.Event('input', { bubbles: true, cancelable: true }));
+      markdownInput.dispatchEvent(new window.Event('change', { bubbles: true, cancelable: true }));
+    });
+    expect(markdownInput.value).toBe(editedMarkdown);
+
+    const dispatchEditorKeydown = async (init: KeyboardEventInit): Promise<KeyboardEvent> => {
+      let evt!: KeyboardEvent;
+      await act(async () => {
+        evt = new window.KeyboardEvent('keydown', {
+          bubbles: true,
+          cancelable: true,
+          ...init,
+        });
+        markdownInput.dispatchEvent(evt);
+        await session.waitForIdle();
+        session.flushRenderFrame();
+        await new Promise((r) => setTimeout(r, 20));
+        await session.waitForIdle();
+        session.flushRenderFrame();
+      });
+      return evt;
+    };
+
+    // 1. Command + Z immediately after typing (before debounce timer fires) undoes the edit
+    const cmdZEvent = await dispatchEditorKeydown({ metaKey: true, key: 'z' });
+    expect(cmdZEvent.defaultPrevented).toBe(true);
+    expect(markdownInput.value).toBe(initialMarkdown);
+    expect(previewStage.textContent).toContain('第一段原始已提交正文。');
+    expect(previewStage.textContent).not.toContain('第二段刚输入尚未触发防抖的新段落。');
+
+    // 2. Command + Y redoes the undone edit
+    const cmdYEvent = await dispatchEditorKeydown({ metaKey: true, key: 'y' });
+    expect(cmdYEvent.defaultPrevented).toBe(true);
+    expect(markdownInput.value).toBe(editedMarkdown);
+    expect(previewStage.textContent).toContain('第二段刚输入尚未触发防抖的新段落。');
+
+    // 3. Ctrl + Z undoes the edit
+    const ctrlZEvent = await dispatchEditorKeydown({ ctrlKey: true, key: 'z' });
+    expect(ctrlZEvent.defaultPrevented).toBe(true);
+    expect(markdownInput.value).toBe(initialMarkdown);
+    expect(previewStage.textContent).not.toContain('第二段刚输入尚未触发防抖的新段落。');
+
+    // 4. Ctrl + Y redoes the edit
+    const ctrlYEvent = await dispatchEditorKeydown({ ctrlKey: true, key: 'y' });
+    expect(ctrlYEvent.defaultPrevented).toBe(true);
+    expect(markdownInput.value).toBe(editedMarkdown);
+    expect(previewStage.textContent).toContain('第二段刚输入尚未触发防抖的新段落。');
+
+    // 5. Undo again with Command + Z, then redo with Command + Shift + Z
+    await dispatchEditorKeydown({ metaKey: true, key: 'z' });
+    expect(markdownInput.value).toBe(initialMarkdown);
+
+    const cmdShiftZEvent = await dispatchEditorKeydown({
+      metaKey: true,
+      shiftKey: true,
+      key: 'z',
+    });
+    expect(cmdShiftZEvent.defaultPrevented).toBe(true);
+    expect(markdownInput.value).toBe(editedMarkdown);
+    expect(previewStage.textContent).toContain('第二段刚输入尚未触发防抖的新段落。');
+  });
+
+  it('test_editor_textarea_bold_keyboard_shortcut_wraps_unwraps_selection_and_updates_preview', async () => {
+    const store = assetStore();
+    const initialMarkdown = '前文普通内容 加粗目标词 后文普通内容。';
+    const session = createEditorSession({
+      assetStore: store,
+      initialMarkdown,
+      debounceMs: 10,
+    });
+
+    const { container } = await mountWorkbench({
+      session,
+      assetStore: store,
+      debounceMs: 10,
+    });
+
+    const markdownInput = getByTestId<HTMLTextAreaElement>(container, 'markdown-input');
+    const previewStage = getByTestId(container, 'preview-stage');
+
+    const targetWord = '加粗目标词';
+    const selStart = initialMarkdown.indexOf(targetWord);
+    const selEnd = selStart + targetWord.length;
+
+    markdownInput.selectionStart = selStart;
+    markdownInput.selectionEnd = selEnd;
+
+    // a) Pressing Command + B wraps selected text with **...** and keeps selection inside **...**
+    let cmdBEvent!: KeyboardEvent;
+    await act(async () => {
+      cmdBEvent = new window.KeyboardEvent('keydown', {
+        metaKey: true,
+        key: 'b',
+        bubbles: true,
+        cancelable: true,
+      });
+      markdownInput.dispatchEvent(cmdBEvent);
+    });
+    await flushWorkbench(session);
+
+    expect(cmdBEvent.defaultPrevented).toBe(true);
+    expect(markdownInput.value).toBe('前文普通内容 **加粗目标词** 后文普通内容。');
+    expect(markdownInput.selectionStart).toBe(selStart + 2);
+    expect(markdownInput.selectionEnd).toBe(selEnd + 2);
+    expect(previewStage.querySelector('strong')?.textContent).toBe(targetWord);
+
+    // b) Pressing Ctrl + B while '加粗目标词' is still selected unwraps **加粗目标词** back to '加粗目标词'
+    let ctrlBEvent!: KeyboardEvent;
+    await act(async () => {
+      ctrlBEvent = new window.KeyboardEvent('keydown', {
+        ctrlKey: true,
+        key: 'b',
+        bubbles: true,
+        cancelable: true,
+      });
+      markdownInput.dispatchEvent(ctrlBEvent);
+    });
+    await flushWorkbench(session);
+
+    expect(ctrlBEvent.defaultPrevented).toBe(true);
+    expect(markdownInput.value).toBe(initialMarkdown);
+    expect(markdownInput.selectionStart).toBe(selStart);
+    expect(markdownInput.selectionEnd).toBe(selEnd);
+    expect(previewStage.querySelector('strong')).toBeNull();
+
+    // c) Collapsed cursor: pressing Command + B inserts **** and positions cursor in the middle
+    const cursorOffset = markdownInput.value.length;
+    markdownInput.selectionStart = cursorOffset;
+    markdownInput.selectionEnd = cursorOffset;
+
+    let collapsedCmdBEvent!: KeyboardEvent;
+    await act(async () => {
+      collapsedCmdBEvent = new window.KeyboardEvent('keydown', {
+        metaKey: true,
+        key: 'b',
+        bubbles: true,
+        cancelable: true,
+      });
+      markdownInput.dispatchEvent(collapsedCmdBEvent);
+    });
+    await flushWorkbench(session);
+
+    expect(collapsedCmdBEvent.defaultPrevented).toBe(true);
+    expect(markdownInput.value).toBe(`${initialMarkdown}****`);
+    expect(markdownInput.selectionStart).toBe(cursorOffset + 2);
+    expect(markdownInput.selectionEnd).toBe(cursorOffset + 2);
+  });
+
+  it('test_scrolling_editor_or_preview_synchronizes_scroll_position_bidirectionally', async () => {
+    const { container } = await mountWorkbench({
+      initialMarkdown: Array.from({ length: 40 }, (_, i) => `第 ${i + 1} 段正文内容。`).join('\n\n'),
+    });
+
+    const markdownInput = getByTestId<HTMLTextAreaElement>(container, 'markdown-input');
+    const lineNumbers = getByTestId<HTMLElement>(container, 'editor-line-numbers');
+    const previewScroll = getByTestId<HTMLElement>(container, 'preview-scroll');
+
+    Object.defineProperties(markdownInput, {
+      scrollHeight: { value: 1000, configurable: true },
+      clientHeight: { value: 200, configurable: true },
+    });
+    Object.defineProperties(previewScroll, {
+      scrollHeight: { value: 2000, configurable: true },
+      clientHeight: { value: 400, configurable: true },
+    });
+
+    // b) Editor scrolls to 50% (400 / 800) -> previewScroll syncs to 50% (800 / 1600) and lineNumbers to 400
+    await act(async () => {
+      markdownInput.scrollTop = 400;
+      markdownInput.dispatchEvent(new window.Event('scroll', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 25));
+    });
+
+    expect(previewScroll.scrollTop).toBe(800);
+    expect(lineNumbers.scrollTop).toBe(400);
+
+    // c) Preview scrolls to 25% (400 / 1600) -> markdownInput syncs to 25% (200 / 800) and lineNumbers to 200
+    await act(async () => {
+      previewScroll.scrollTop = 400;
+      previewScroll.dispatchEvent(new window.Event('scroll', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 25));
+    });
+
+    expect(markdownInput.scrollTop).toBe(200);
+    expect(lineNumbers.scrollTop).toBe(200);
+  });
 });

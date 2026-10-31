@@ -32,10 +32,15 @@ function findMathAtom(node: Node | null): HTMLElement | null {
  */
 export function extractPlainTextFromDom(node: Node): string {
   const BLOCK_SEP = '\0BLOCK_SEP\0';
+  const EXTRA_BLANK_SEP = '\0EXTRA_BLANK\0';
   const BLOCK_TAG_RE =
     /^(div|p|h[1-6]|blockquote|ul|ol|li|tr|pre|table|thead|tbody|tfoot|header|footer|section|figure|figcaption)$/;
   const STRUCTURAL_SIBLING_RE =
     /^(div|p|h[1-6]|blockquote|ul|ol|li|tr|td|th|pre|table|thead|tbody|tfoot|header|footer|section|figure|figcaption|hr)$/;
+  const hasExtraBlankLines =
+    node.nodeType === 1 &&
+    ((node as Element).hasAttribute?.('data-extra-blank-lines') ||
+      Boolean((node as Element).querySelector?.('[data-extra-blank-lines]')));
   let text = '';
 
   function isInterBlockFormattingText(
@@ -148,14 +153,27 @@ export function extractPlainTextFromDom(node: Node): string {
       if (isBlock && text.length > 0 && !text.endsWith(BLOCK_SEP)) {
         text += BLOCK_SEP;
       }
+      const extraLinesAttr = el.getAttribute('data-extra-blank-lines');
+      if (extraLinesAttr) {
+        const extraLines = parseInt(extraLinesAttr, 10);
+        if (Number.isFinite(extraLines) && extraLines > 0) {
+          text += EXTRA_BLANK_SEP.repeat(extraLines);
+        }
+      }
     }
   }
 
   walk(node, false);
+  const defaultBlockBreak = hasExtraBlankLines ? '\n\n' : '\n';
   return text
-    .replace(/^(?:\0BLOCK_SEP\0)+/, '')
-    .replace(/(?:\0BLOCK_SEP\0)+$/, '')
-    .replace(/(?:\0BLOCK_SEP\0)+/g, '\n');
+    .replace(/^(?:\0BLOCK_SEP\0|\0EXTRA_BLANK\0)+/, '')
+    .replace(/(?:\0BLOCK_SEP\0|\0EXTRA_BLANK\0)+$/, '')
+    .replace(/(?:\0BLOCK_SEP\0)+((?:\0EXTRA_BLANK\0)+)(?:\0BLOCK_SEP\0)*/g, (_match, extras: string) => {
+      const count = extras.split(EXTRA_BLANK_SEP).length - 1;
+      return '\n\n' + '\n'.repeat(count);
+    })
+    .replace(/(?:\0BLOCK_SEP\0)+/g, defaultBlockBreak)
+    .replace(/\0EXTRA_BLANK\0/g, '\n');
 }
 
 function replaceAssetsAndFormulas(

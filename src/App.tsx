@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AssetStore } from './core/assets/store';
 import type { AssetPackageManifest } from './core/assets/types';
 import { exportCardsZipPackage } from './core/cards/exporter';
@@ -294,8 +294,12 @@ export const App: React.FC<AppProps> = ({
 
   const appRootRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lineGutterRef = useRef<HTMLDivElement | null>(null);
   const previewScrollRef = useRef<HTMLDivElement | null>(null);
   const previewStageRef = useRef<HTMLDivElement | null>(null);
+  const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
+  const lastProgrammaticEditorScrollTopRef = useRef<number | null>(null);
+  const lastProgrammaticPreviewScrollTopRef = useRef<number | null>(null);
   const cssGuideDialogRef = useRef<HTMLDialogElement | null>(null);
   const snapshotRef = useRef<DeliverySnapshot>(snapshot);
   snapshotRef.current = snapshot;
@@ -529,6 +533,138 @@ export const App: React.FC<AppProps> = ({
       applyMarkdownInput(e.target.value, e.target);
     },
     [applyMarkdownInput]
+  );
+
+  const handleEditorUndoRedoKeyDown = useCallback(
+    (
+      event: Pick<
+        KeyboardEvent,
+        | 'metaKey'
+        | 'ctrlKey'
+        | 'altKey'
+        | 'shiftKey'
+        | 'key'
+        | 'code'
+        | 'defaultPrevented'
+        | 'preventDefault'
+        | 'stopPropagation'
+      >,
+      textarea?: HTMLTextAreaElement | null
+    ) => {
+      if (event.defaultPrevented) return;
+      const hasMod = Boolean(event.metaKey || event.ctrlKey) && !event.altKey;
+      if (!hasMod) return;
+
+      const keyLower = (event.key || '').toLowerCase();
+      const isZ = keyLower === 'z' || event.code === 'KeyZ';
+      const isY = keyLower === 'y' || event.code === 'KeyY';
+      const isB = !event.shiftKey && (keyLower === 'b' || event.code === 'KeyB');
+      const isUndo = !event.shiftKey && isZ;
+      const isRedo = (!event.shiftKey && isY) || (event.shiftKey && isZ);
+
+      if (isB) {
+        event.preventDefault();
+        event.stopPropagation?.();
+        const targetTextarea = textarea ?? textareaRef.current;
+        const prevMd = markdownRef.current;
+        const rawStart =
+          targetTextarea && typeof targetTextarea.selectionStart === 'number'
+            ? targetTextarea.selectionStart
+            : prevMd.length;
+        const rawEnd =
+          targetTextarea && typeof targetTextarea.selectionEnd === 'number'
+            ? targetTextarea.selectionEnd
+            : rawStart;
+        const selStart = Math.max(0, Math.min(rawStart, prevMd.length));
+        const selEnd = Math.max(selStart, Math.min(rawEnd, prevMd.length));
+        const selectedText = prevMd.slice(selStart, selEnd);
+
+        let nextMd = prevMd;
+        let nextSelStart = selStart;
+        let nextSelEnd = selEnd;
+
+        if (
+          selEnd - selStart >= 4 &&
+          selectedText.startsWith('**') &&
+          selectedText.endsWith('**')
+        ) {
+          const unwrapped = selectedText.slice(2, -2);
+          nextMd = `${prevMd.slice(0, selStart)}${unwrapped}${prevMd.slice(selEnd)}`;
+          nextSelStart = selStart;
+          nextSelEnd = selStart + unwrapped.length;
+        } else if (
+          selStart >= 2 &&
+          prevMd.slice(selStart - 2, selStart) === '**' &&
+          prevMd.slice(selEnd, selEnd + 2) === '**'
+        ) {
+          nextMd = `${prevMd.slice(0, selStart - 2)}${selectedText}${prevMd.slice(selEnd + 2)}`;
+          nextSelStart = selStart - 2;
+          nextSelEnd = selEnd - 2;
+        } else {
+          nextMd = `${prevMd.slice(0, selStart)}**${selectedText}**${prevMd.slice(selEnd)}`;
+          nextSelStart = selStart + 2;
+          nextSelEnd = selEnd + 2;
+        }
+
+        pendingSelectionRef.current = { start: nextSelStart, end: nextSelEnd };
+        markdownRef.current = nextMd;
+        setMarkdown(nextMd);
+        setIsSaving(true);
+        const slice = nextMd.slice(0, nextSelEnd);
+        const lines = slice.split('\n');
+        setCursorPos({
+          line: lines.length,
+          col: (lines[lines.length - 1]?.length ?? 0) + 1,
+        });
+        void session.commitDoc(nextMd).then((snap) => {
+          setSnapshot(snap);
+          setIsSaving(false);
+        });
+        return;
+      }
+
+      if (!isUndo && !isRedo) return;
+
+      event.preventDefault();
+      event.stopPropagation?.();
+      const prevMd = markdownRef.current;
+      const actionPromise = isUndo ? session.undo() : session.redo();
+      const nextMd = session.getDraftMarkdown();
+
+      if (nextMd !== prevMd) {
+        let prefixLen = 0;
+        const minLen = Math.min(prevMd.length, nextMd.length);
+        while (prefixLen < minLen && prevMd.charCodeAt(prefixLen) === nextMd.charCodeAt(prefixLen)) {
+          prefixLen++;
+        }
+        let suffixLen = 0;
+        while (
+          suffixLen < minLen - prefixLen &&
+          prevMd.charCodeAt(prevMd.length - 1 - suffixLen) ===
+            nextMd.charCodeAt(nextMd.length - 1 - suffixLen)
+        ) {
+          suffixLen++;
+        }
+        const nextCursorPos = Math.max(prefixLen, nextMd.length - suffixLen);
+        pendingSelectionRef.current = { start: nextCursorPos, end: nextCursorPos };
+        markdownRef.current = nextMd;
+        setMarkdown(nextMd);
+        const slice = nextMd.slice(0, nextCursorPos);
+        const lines = slice.split('\n');
+        setCursorPos({
+          line: lines.length,
+          col: (lines[lines.length - 1]?.length ?? 0) + 1,
+        });
+      }
+
+      setIsSaving(false);
+      void actionPromise.then((snap) => {
+        if (snap) {
+          setSnapshot(snap);
+        }
+      });
+    },
+    [session, updateCursorMetrics]
   );
 
   const handleEditorPaste = useCallback(
@@ -814,17 +950,106 @@ export const App: React.FC<AppProps> = ({
       }
     };
 
+    const handleNativeKeyDown = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target || typeof target.getAttribute !== 'function') return;
+      if (target.getAttribute('data-testid') === 'markdown-input') {
+        handleEditorUndoRedoKeyDown(event as KeyboardEvent, target as HTMLTextAreaElement);
+      }
+    };
+
     rootEl.addEventListener('input', handleNativeInputOrChange);
     rootEl.addEventListener('change', handleNativeInputOrChange);
+    rootEl.addEventListener('keydown', handleNativeKeyDown);
     return () => {
       rootEl.removeEventListener('input', handleNativeInputOrChange);
       rootEl.removeEventListener('change', handleNativeInputOrChange);
+      rootEl.removeEventListener('keydown', handleNativeKeyDown);
     };
   }, [
     applyCustomCssValue,
     applyMarkdownInput,
     handleDraftCssPresetNameChange,
+    handleEditorUndoRedoKeyDown,
   ]);
+
+  useLayoutEffect(() => {
+    const pending = pendingSelectionRef.current;
+    if (!pending) return;
+    pendingSelectionRef.current = null;
+    const el = textareaRef.current;
+    if (el) {
+      try {
+        el.selectionStart = pending.start;
+        el.selectionEnd = pending.end;
+      } catch {
+        // ignore selection assignment errors on detached nodes
+      }
+    }
+  }, [markdown]);
+
+  // Bidirectional scroll synchronization between editor textarea (and line gutter) and preview scroll container
+  useEffect(() => {
+    const editorEl = textareaRef.current;
+    const previewEl = previewScrollRef.current;
+    if (!editorEl || !previewEl) return;
+
+    const handleEditorScroll = () => {
+      const gutterEl = lineGutterRef.current;
+      if (gutterEl) {
+        gutterEl.scrollTop = editorEl.scrollTop;
+      }
+
+      if (
+        lastProgrammaticEditorScrollTopRef.current !== null &&
+        Math.abs(editorEl.scrollTop - lastProgrammaticEditorScrollTopRef.current) <= 1
+      ) {
+        lastProgrammaticEditorScrollTopRef.current = null;
+        return;
+      }
+      lastProgrammaticEditorScrollTopRef.current = null;
+
+      const maxEditor = Math.max(0, editorEl.scrollHeight - editorEl.clientHeight);
+      const maxPreview = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight);
+      const ratio = maxEditor > 0 ? Math.min(1, Math.max(0, editorEl.scrollTop / maxEditor)) : 0;
+      const targetPreviewTop = Math.round(ratio * maxPreview);
+      if (Math.abs(previewEl.scrollTop - targetPreviewTop) >= 1) {
+        lastProgrammaticPreviewScrollTopRef.current = targetPreviewTop;
+        previewEl.scrollTop = targetPreviewTop;
+      }
+    };
+
+    const handlePreviewScroll = () => {
+      if (
+        lastProgrammaticPreviewScrollTopRef.current !== null &&
+        Math.abs(previewEl.scrollTop - lastProgrammaticPreviewScrollTopRef.current) <= 1
+      ) {
+        lastProgrammaticPreviewScrollTopRef.current = null;
+        return;
+      }
+      lastProgrammaticPreviewScrollTopRef.current = null;
+
+      const maxPreview = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight);
+      const maxEditor = Math.max(0, editorEl.scrollHeight - editorEl.clientHeight);
+      const ratio = maxPreview > 0 ? Math.min(1, Math.max(0, previewEl.scrollTop / maxPreview)) : 0;
+      const targetEditorTop = Math.round(ratio * maxEditor);
+      if (Math.abs(editorEl.scrollTop - targetEditorTop) >= 1) {
+        lastProgrammaticEditorScrollTopRef.current = targetEditorTop;
+        editorEl.scrollTop = targetEditorTop;
+      }
+      const gutterEl = lineGutterRef.current;
+      if (gutterEl) {
+        gutterEl.scrollTop = targetEditorTop;
+      }
+    };
+
+    editorEl.addEventListener('scroll', handleEditorScroll, { passive: true });
+    previewEl.addEventListener('scroll', handlePreviewScroll, { passive: true });
+    return () => {
+      editorEl.removeEventListener('scroll', handleEditorScroll);
+      previewEl.removeEventListener('scroll', handlePreviewScroll);
+    };
+  }, []);
 
   const startColumnResize = useCallback((target: 'editor' | 'drawer', clientX: number) => {
     activeResizeRef.current = {
@@ -1217,6 +1442,7 @@ export const App: React.FC<AppProps> = ({
 
           <div className="morph-editor-body" data-testid="markdown-editor">
             <div
+              ref={lineGutterRef}
               className="morph-line-gutter"
               data-testid="editor-line-numbers"
               aria-hidden="true"

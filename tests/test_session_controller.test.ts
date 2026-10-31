@@ -794,4 +794,63 @@ describe('TestEditorSessionController', () => {
     },
     30000
   );
+
+  it('test_undo_immediately_during_pending_input_debounce_preserves_uncommitted_draft_on_redo_stack', async () => {
+    const store = assetStore();
+    const initialMarkdown = '# 初始已提交标题\n\n第一段已提交内容。';
+    const secondCommittedMarkdown = '# 初始已提交标题\n\n第一段已提交内容。\n\n第二段已提交内容。';
+    const uncommittedDraftMarkdown =
+      '# 初始已提交标题\n\n第一段已提交内容。\n\n第二段已提交内容。\n\n第三段尚未过防抖窗口的草稿内容。';
+
+    const session = createEditorSession({
+      assetStore: store,
+      initialMarkdown,
+      debounceMs: 250,
+    });
+
+    await session.waitForIdle();
+    expect(session.getDraftMarkdown()).toBe(initialMarkdown);
+    expect(session.getCommittedMarkdown()).toBe(initialMarkdown);
+    expect(session.canUndo()).toBe(false);
+    expect(session.canRedo()).toBe(false);
+
+    await session.commitDoc(secondCommittedMarkdown);
+    expect(session.getDraftMarkdown()).toBe(secondCommittedMarkdown);
+    expect(session.getCommittedMarkdown()).toBe(secondCommittedMarkdown);
+    expect(session.canUndo()).toBe(true);
+
+    // Trigger inputDoc without flushing so the draft remains uncommitted while debounce is pending
+    void session.inputDoc(uncommittedDraftMarkdown);
+    expect(session.getDraftMarkdown()).toBe(uncommittedDraftMarkdown);
+    expect(session.getCommittedMarkdown()).toBe(secondCommittedMarkdown);
+    expect(session.canUndo()).toBe(true);
+
+    // Immediately call undo() before the debounce timer fires
+    const undoneToSecond = await session.undo();
+    expect(undoneToSecond).not.toBeNull();
+    expect(session.getDraftMarkdown()).toBe(secondCommittedMarkdown);
+    expect(session.getCommittedMarkdown()).toBe(secondCommittedMarkdown);
+    expect(session.canRedo()).toBe(true);
+    expect(documentOf(undoneToSecond!.html).body.textContent).toContain('第二段已提交内容。');
+    expect(documentOf(undoneToSecond!.html).body.textContent).not.toContain(
+      '第三段尚未过防抖窗口的草稿内容。'
+    );
+
+    // Subsequent redo() restores the uncommitted draft that was preserved on the redo stack
+    const redoneDraft = await session.redo();
+    expect(redoneDraft).not.toBeNull();
+    expect(session.getDraftMarkdown()).toBe(uncommittedDraftMarkdown);
+    expect(session.getCommittedMarkdown()).toBe(uncommittedDraftMarkdown);
+    expect(documentOf(redoneDraft!.html).body.textContent).toContain(
+      '第三段尚未过防抖窗口的草稿内容。'
+    );
+
+    evidence('session-undo-uncommitted-draft', {
+      afterUndoMarkdown: undoneToSecond ? session.getCommittedMarkdown() : null,
+      afterRedoMarkdown: session.getCommittedMarkdown(),
+      redoneHtml: redoneDraft?.html,
+    });
+
+    session.dispose();
+  });
 });

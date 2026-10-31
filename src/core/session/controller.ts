@@ -299,7 +299,35 @@ export class EditorSessionController {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
+    const pendingResolvers = this.debounceResolvers.splice(0, this.debounceResolvers.length);
+
+    if (this.hasCommittedDoc && this.draftMarkdown !== this.committedMarkdown) {
+      this.redoStack = [this.draftMarkdown];
+      this.draftMarkdown = this.committedMarkdown;
+      this.version = {
+        ...this.version,
+        doc: this.version.doc + 1,
+      };
+      const buildPromise = this.runSnapshotBuild(this.committedMarkdown, { ...this.version });
+      if (pendingResolvers.length > 0) {
+        buildPromise.then(
+          (snap) => {
+            for (const r of pendingResolvers) r.resolve(snap);
+          },
+          (err) => {
+            for (const r of pendingResolvers) r.reject(err);
+          }
+        );
+      }
+      return buildPromise;
+    }
+
     if (this.undoStack.length === 0) {
+      if (pendingResolvers.length > 0 && this.currentSnapshot) {
+        for (const r of pendingResolvers) {
+          r.resolve(this.currentSnapshot);
+        }
+      }
       return Promise.resolve(null);
     }
 
@@ -312,7 +340,18 @@ export class EditorSessionController {
       doc: this.version.doc + 1,
     };
 
-    return this.runSnapshotBuild(this.committedMarkdown, { ...this.version });
+    const buildPromise = this.runSnapshotBuild(this.committedMarkdown, { ...this.version });
+    if (pendingResolvers.length > 0) {
+      buildPromise.then(
+        (snap) => {
+          for (const r of pendingResolvers) r.resolve(snap);
+        },
+        (err) => {
+          for (const r of pendingResolvers) r.reject(err);
+        }
+      );
+    }
+    return buildPromise;
   }
 
   public redo(): Promise<DeliverySnapshot | null> {
@@ -320,7 +359,14 @@ export class EditorSessionController {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
+    const pendingResolvers = this.debounceResolvers.splice(0, this.debounceResolvers.length);
+
     if (this.redoStack.length === 0) {
+      if (pendingResolvers.length > 0 && this.currentSnapshot) {
+        for (const r of pendingResolvers) {
+          r.resolve(this.currentSnapshot);
+        }
+      }
       return Promise.resolve(null);
     }
 
@@ -333,11 +379,25 @@ export class EditorSessionController {
       doc: this.version.doc + 1,
     };
 
-    return this.runSnapshotBuild(this.committedMarkdown, { ...this.version });
+    const buildPromise = this.runSnapshotBuild(this.committedMarkdown, { ...this.version });
+    if (pendingResolvers.length > 0) {
+      buildPromise.then(
+        (snap) => {
+          for (const r of pendingResolvers) r.resolve(snap);
+        },
+        (err) => {
+          for (const r of pendingResolvers) r.reject(err);
+        }
+      );
+    }
+    return buildPromise;
   }
 
   public canUndo(): boolean {
-    return this.undoStack.length > 0;
+    return (
+      this.undoStack.length > 0 ||
+      (this.hasCommittedDoc && this.draftMarkdown !== this.committedMarkdown)
+    );
   }
 
   public canRedo(): boolean {
