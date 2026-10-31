@@ -200,10 +200,84 @@ body,
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
+.morph-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0 32px 0 12px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%2337352f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5L6 8L9.5 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+}
+
 .morph-select:hover,
 .morph-btn-secondary:hover:not(:disabled) {
   background-color: var(--ui-bg-hover);
   border-color: var(--ui-border-strong);
+}
+
+/* Status Dot Userscript Pill */
+.morph-userscript-pill {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--ui-radius-sm);
+  border: 1px solid rgba(55, 53, 47, 0.16);
+  background-color: var(--ui-bg-surface);
+  color: var(--ui-ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.morph-userscript-pill:hover {
+  background-color: var(--ui-bg-hover);
+  border-color: rgba(55, 53, 47, 0.28);
+}
+
+.morph-userscript-pill.is-ready {
+  border-color: rgba(16, 185, 129, 0.32);
+  background-color: rgba(16, 185, 129, 0.04);
+}
+
+.morph-userscript-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #f59e0b;
+  flex-shrink: 0;
+  transition: background-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.morph-userscript-pill.is-uninstalled .morph-userscript-dot {
+  background-color: #f59e0b;
+}
+
+.morph-userscript-pill.is-ready .morph-userscript-dot {
+  background-color: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+  animation: morphStatusPulse 2.4s ease-in-out infinite;
+}
+
+.morph-userscript-label {
+  line-height: 1;
+}
+
+@keyframes morphStatusPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.65);
+  }
 }
 
 .morph-btn-secondary:disabled {
@@ -648,6 +722,17 @@ body,
   color: #0f1419;
 }
 
+.morph-preview-stage[data-target-view="x-article"] p.morph-figure-media {
+  margin: 0 0 6px 0;
+}
+
+.morph-preview-stage[data-target-view="x-article"] p.morph-caption {
+  margin: 0 0 16px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #787774;
+}
+
 .morph-preview-stage[data-target-view="x-article"] blockquote,
 .morph-preview-stage[data-target-view="x-article"] blockquote.morph-quote {
   margin: 18px 0;
@@ -668,6 +753,12 @@ body,
 .morph-preview-stage[data-target-view="x-article"] ol {
   margin: 14px 0 18px 0;
   padding-left: 24px;
+}
+
+.morph-preview-stage[data-target-view="x-article"] li ul {
+  list-style-type: none;
+  padding-left: 0;
+  margin: 6px 0;
 }
 
 .morph-preview-stage[data-target-view="x-article"] li {

@@ -1,8 +1,10 @@
 import { chromium, type Browser, type Page } from 'playwright';
+import { build as viteBuild } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   AssetStore,
   buildDeliverySnapshot,
+  compileMarkdown,
 } from '../src/index';
 import { decodeBitmapDataUrl, png } from './support/fixtures';
 import {
@@ -414,9 +416,10 @@ describe('TestXArticlePipeline', () => {
       const richStyles = new Set(richParagraph!.inlineStyleRanges.map((r) => r.style));
       expect(richStyles).toEqual(new Set(['BOLD', 'ITALIC', 'STRIKETHROUGH', 'CODE']));
 
-      const nestedUlItem = blocks.find((b) => b.text === '无序嵌套子项');
-      expect(nestedUlItem?.type).toBe('unordered-list-item');
-      expect(nestedUlItem?.depth).toBe(1);
+      const flattenedUlItem = blocks.find((b) => b.type === 'unordered-list-item' && b.text.includes('无序父项'));
+      expect(flattenedUlItem).toBeDefined();
+      expect(flattenedUlItem?.depth).toBe(0);
+      expect(flattenedUlItem?.text).toBe('无序父项\n- 无序嵌套子项');
 
       const orderedItems = blocks.filter((b) => b.type === 'ordered-list-item');
       expect(orderedItems.map((b) => b.text)).toEqual(['有序第一项', '有序第二项']);
@@ -480,13 +483,17 @@ describe('TestXArticlePipeline', () => {
       '',
       '<div class="morph-doc"><p>嵌套morph-doc容器内的段落</p></div>',
       '',
-      '- 第1层列表项',
-      '  - 第2层列表项',
-      '    - 第3层列表项',
-      '      - 第4层列表项',
-      '        - 第5层列表项',
-      '          - 第6层列表项',
-      '            - 第7层列表项',
+      '1. 第1层列表项',
+      '   1. 第2层列表项',
+      '      1. 第3层列表项',
+      '         1. 第4层列表项',
+      '            1. 第5层列表项',
+      '               1. 第6层列表项',
+      '                  1. 第7层列表项',
+      '',
+      '- 无序父级列表项',
+      '  - 无序子级列表项A',
+      '    - 无序孙级列表项B',
     ].join('\n');
 
     const snapshot = await buildDeliverySnapshot(markdown, 'x-article', assetStore);
@@ -511,6 +518,13 @@ describe('TestXArticlePipeline', () => {
       expect(listBlocks.length).toBeGreaterThanOrEqual(7);
       expect(listBlocks.every((b) => b.depth <= 4)).toBe(true);
       expect(Math.max(...listBlocks.map((b) => b.depth))).toBe(4);
+      const flattenedNestedUl = blocks.find(
+        (b) =>
+          b.type === 'unordered-list-item' &&
+          b.text === '无序父级列表项\n- 无序子级列表项A\n- 无序孙级列表项B'
+      );
+      expect(flattenedNestedUl).toBeDefined();
+      expect(flattenedNestedUl?.depth).toBe(0);
       // 3. 原稿所有正文、深层列表项与图片替代文本一字不差
       expect(Object.values(entityMap).filter((e) => e.type === 'IMAGE').length).toBe(2);
       const expectedTexts = [
@@ -538,6 +552,7 @@ describe('TestXArticlePipeline', () => {
         '第5层列表项',
         '第6层列表项',
         '第7层列表项',
+        '无序父级列表项\n- 无序子级列表项A\n- 无序孙级列表项B',
       ];
       for (const txt of expectedTexts) {
         expect(`${allBlockText}\n${allAlts}`).toContain(txt);
@@ -746,6 +761,169 @@ describe('TestXArticlePipeline', () => {
       expect(allBlockText).toContain('列表项中部文字');
       expect(allBlockText).toContain('列表项尾部文字');
       expect(allBlockText).toContain('保留的有效结尾段落');
+    } finally {
+      assetStore.clear();
+    }
+  });
+
+  // =========================================================================
+  // 维度 10：块级数学公式与矮表格防裁切画布尺寸（680px 栏宽 & 宽高比 <= 4.0:1）及代码语言别名高亮（Issue #7）
+  // =========================================================================
+  it('test_display_math_and_short_table_canvas_enforce_anti_crop_aspect_ratio_and_language_aliases', async () => {
+    const assetStore = new AssetStore();
+    const markdown = [
+      '# 公式与表格防裁切及语言别名测试',
+      '',
+      '$$\\mathcal{S}_{\\text{fidelity}}(D) = \\frac{1}{|B|} \\sum_{b \\in B} \\mathbb{I}\\big(\\text{Render}_{\\text{target}}(b) \\cong \\text{Render}_{\\text{stage}}(b)\\big)$$',
+      '',
+      '| A | B |',
+      '|---|---|',
+      '| 1 | 2 |',
+      '',
+      '```ts',
+      'const x: number = 1;',
+      '```',
+      '',
+      '```js',
+      'const y = 2;',
+      '```',
+      '',
+      '```py',
+      'def calc(): pass',
+      '```',
+    ].join('\n');
+
+    const snapshot = await buildDeliverySnapshot(markdown, 'x-article', assetStore);
+
+    try {
+      expect(snapshot.ready).toBe(true);
+      // 1. 验证 ts / js / py 语言别名代码块不触发 code/unknown-language 告警诊断
+      const unknownLangDiags = snapshot.diagnostics.filter(
+        (d) => d.code === 'code/unknown-language'
+      );
+      expect(unknownLangDiags).toEqual([]);
+
+      // 2. 在真实浏览器 page.evaluate 中调用生成的块级公式与矮表格位图，验证物理宽度为 1360（2x 680px）且宽高比 width / height <= 4.0
+      const rawCompiled = await compileMarkdown(markdown);
+      const xNormalizerBundle = await viteBuild({
+        configFile: false,
+        logLevel: 'silent',
+        build: {
+          write: false,
+          lib: {
+            entry: 'src/core/x-article/normalizer.ts',
+            name: 'MorphXNormalizer',
+            formats: ['iife'],
+          },
+        },
+      });
+      const xNormalizerCode = (xNormalizerBundle as any)[0].output[0].code as string;
+
+      const rasterResult = await page.evaluate(
+        ({ rawHtml, bundleCode }) => {
+          const scriptEl = document.createElement('script');
+          scriptEl.textContent = bundleCode;
+          document.head.appendChild(scriptEl);
+          const container = document.createElement('div');
+          container.innerHTML = rawHtml;
+          const diags: unknown[] = [];
+          (window as any).MorphXNormalizer.normalizeXArticleStructureAndStyles(container, diags);
+
+          const mathImg = container.querySelector(
+            'img[data-raster-type="math"][data-math-display="block"]'
+          ) as HTMLImageElement | null;
+          const tableImg = container.querySelector(
+            'img[data-raster-type="table"]'
+          ) as HTMLImageElement | null;
+
+          return {
+            mathSrc: mathImg?.getAttribute('src') || '',
+            mathCssWidth: Number(mathImg?.getAttribute('width') || 0),
+            mathCssHeight: Number(mathImg?.getAttribute('height') || 0),
+            tableSrc: tableImg?.getAttribute('src') || '',
+          };
+        },
+        { rawHtml: rawCompiled.html, bundleCode: xNormalizerCode }
+      );
+
+      expect(rasterResult.mathSrc).toMatch(/^data:image\/png;base64,/);
+      expect(rasterResult.tableSrc).toMatch(/^data:image\/png;base64,/);
+      expect(rasterResult.mathCssWidth).toBe(680);
+      expect(rasterResult.mathCssHeight).toBeGreaterThanOrEqual(170);
+
+      const decodedMath = await decodeBitmapDataUrl(page, rasterResult.mathSrc);
+      expect(decodedMath.decoded).toBe(true);
+      expect(decodedMath.width).toBe(1360);
+      expect(decodedMath.height).toBeGreaterThanOrEqual(340);
+      expect(decodedMath.width / decodedMath.height).toBeLessThanOrEqual(4.0);
+
+      const decodedTable = await decodeBitmapDataUrl(page, rasterResult.tableSrc);
+      expect(decodedTable.decoded).toBe(true);
+      expect(decodedTable.width).toBe(1360);
+      expect(decodedTable.height).toBeGreaterThanOrEqual(340);
+      expect(decodedTable.width / decodedTable.height).toBeLessThanOrEqual(4.0);
+    } finally {
+      assetStore.clear();
+    }
+  });
+
+  // =========================================================================
+  // 维度 11：二级无序列表通过 <br>- 拍平至父级 <li>，消除首项粘连、空行与尾部换行并保留行内样式
+  // =========================================================================
+  it('test_nested_unordered_list_items_map_to_dash_prefix_while_preserving_top_level_items_and_inline_formatting', async () => {
+    const assetStore = new AssetStore();
+    const markdown = [
+      '- **IP 地址：给每一台联网设备分配的门牌号**',
+      '  - 第一类是**公网 IP**（如 `203.0.113.50`）',
+      '  - 第二类是**局域网/内网 IP**（如 `192.168.x.x`）',
+      '  - 第三类是**本地回环地址** `127.0.0.1`',
+    ].join('\n');
+
+    const snapshot = await buildDeliverySnapshot(markdown, 'x-article', assetStore);
+
+    try {
+      const verifyResult = await xSession.verifyHtml(snapshot.html);
+      const { blocks } = verifyResult.draftState;
+
+      expect(snapshot.ready).toBe(true);
+      expect(verifyResult.isValid).toBe(true);
+      expect(verifyResult.inValidInfo).toEqual({});
+
+      // HTML 结构中无嵌套 <ul> 残留在 <li> 内，且使用 <br>- 连接子项
+      expect(snapshot.html).not.toMatch(/<li[^>]*>[\s\S]*?<ul\b/i);
+      expect(snapshot.html).toContain('<br>- ');
+
+      const ulBlocks = blocks.filter((b) => b.type === 'unordered-list-item');
+      expect(ulBlocks.length).toBe(1);
+
+      const [ulItem] = ulBlocks;
+      expect(ulItem!.depth).toBe(0);
+      expect(ulItem!.text).toBe(
+        [
+          'IP 地址：给每一台联网设备分配的门牌号',
+          '- 第一类是公网 IP（如 203.0.113.50）',
+          '- 第二类是局域网/内网 IP（如 192.168.x.x）',
+          '- 第三类是本地回环地址 127.0.0.1',
+        ].join('\n')
+      );
+      expect(ulItem!.text).not.toContain('\n\n');
+      expect(ulItem!.text.endsWith('\n')).toBe(false);
+
+      const boldRanges = ulItem!.inlineStyleRanges.filter((r) => r.style === 'BOLD');
+      const codeRanges = ulItem!.inlineStyleRanges.filter((r) => r.style === 'CODE');
+      expect(boldRanges.length).toBe(4);
+      expect(codeRanges.length).toBe(3);
+      expect(
+        boldRanges.map((r) => ulItem!.text.slice(r.offset, r.offset + r.length))
+      ).toEqual([
+        'IP 地址：给每一台联网设备分配的门牌号',
+        '公网 IP',
+        '局域网/内网 IP',
+        '本地回环地址',
+      ]);
+      expect(
+        codeRanges.map((r) => ulItem!.text.slice(r.offset, r.offset + r.length))
+      ).toEqual(['203.0.113.50', '192.168.x.x', '127.0.0.1']);
     } finally {
       assetStore.clear();
     }

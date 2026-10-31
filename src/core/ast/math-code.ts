@@ -15,6 +15,19 @@ const SUPPORTED_LANGS: BundledLanguage[] = [
   'markdown', 'bash', 'sh', 'yaml', 'sql', 'go', 'rust', 'diff',
 ];
 
+const LANG_ALIASES: Record<string, BundledLanguage> = {
+  ts: 'typescript',
+  js: 'javascript',
+  py: 'python',
+  yml: 'yaml',
+  shell: 'bash',
+  zsh: 'bash',
+  htm: 'html',
+  md: 'markdown',
+  rs: 'rust',
+  golang: 'go',
+};
+
 const SUPPORTED_THEMES: BundledTheme[] = [
   'github-light',
   'github-dark',
@@ -190,6 +203,7 @@ export function transformMathAndCode(
 
         const langMatch = classList.find((c) => c.startsWith('language-'));
         const lang = langMatch ? langMatch.replace('language-', '') : '';
+        const resolvedLang = LANG_ALIASES[lang.toLowerCase()] || lang.toLowerCase();
         const rawCode = extractRawText(node).replace(/\r?\n$/, '');
         const extraMediaChildren = node.children.filter(
           (c): c is Element => c.type === 'element' && c.tagName === 'img'
@@ -198,7 +212,7 @@ export function transformMathAndCode(
 
         const isSupportedTheme = SUPPORTED_THEMES.includes(themeKey as BundledTheme);
         const supportedTheme = isSupportedTheme ? (themeKey as BundledTheme) : 'github-light';
-        const isSupportedLang = SUPPORTED_LANGS.includes(lang as BundledLanguage);
+        const isSupportedLang = SUPPORTED_LANGS.includes(resolvedLang as BundledLanguage);
 
         const startLine = node.position?.start?.line ?? 1;
         const endLine = node.position?.end?.line ?? startLine;
@@ -236,7 +250,7 @@ export function transformMathAndCode(
           if (highlighter && isSupportedLang) {
             try {
               const hlTree = highlighter.codeToHast(rawCode, {
-                lang: lang as BundledLanguage,
+                lang: resolvedLang as BundledLanguage,
                 theme: supportedTheme,
               });
               const preElement = hlTree.children[0] as Element;

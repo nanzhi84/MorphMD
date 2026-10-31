@@ -110,6 +110,137 @@ function normalizeOrphanTableHtml() {
   };
 }
 
+function isCjkOrFullwidthCode(code: number | null): boolean {
+  if (code === null || code < 0) return false;
+  const ch = String.fromCodePoint(code);
+  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\u3000-\u303F\uFF00-\uFFEF\u2000-\u206F]/u.test(
+    ch
+  );
+}
+
+function isPunctuationOrSymbolCode(code: number | null): boolean {
+  if (code === null || code < 0) return false;
+  const ch = String.fromCodePoint(code);
+  return /[\p{P}\p{S}]/u.test(ch);
+}
+
+function isWhitespaceOrNullCode(code: number | null): boolean {
+  if (code === null || code < 0) return true;
+  const ch = String.fromCodePoint(code);
+  return /\s/u.test(ch);
+}
+
+function remarkCjkFriendly(this: any) {
+  const data = this.data();
+  const micromarkExtensions = data.micromarkExtensions || (data.micromarkExtensions = []);
+
+  const findBaseConstruct = (context: any, code: number, name: string) => {
+    const list = context.parser?.constructs?.text?.[code];
+    if (!Array.isArray(list)) return null;
+    return list.find((item: any) => item && item.name === name) ?? null;
+  };
+
+  const cjkAttention = {
+    name: 'cjkAttention',
+    resolveAll(events: any[], context: any) {
+      const base = findBaseConstruct(context, 42, 'attention');
+      return base && typeof base.resolveAll === 'function'
+        ? base.resolveAll(events, context)
+        : events;
+    },
+    tokenize(this: any, effects: any, ok: any, nok: any) {
+      const self = this;
+      const previous = self.previous;
+      return (code: number) => {
+        const base = findBaseConstruct(self, code, 'attention');
+        if (!base) return nok(code);
+        const marker = code;
+        return base.tokenize.call(
+          self,
+          effects,
+          (afterCode: number | null) => {
+            const lastEvent = self.events[self.events.length - 1];
+            const token = lastEvent?.[1];
+            if (token && token.type === 'attentionSequence') {
+              if (isCjkOrFullwidthCode(previous) || isCjkOrFullwidthCode(afterCode)) {
+                const beforeClass = isWhitespaceOrNullCode(previous)
+                  ? 1
+                  : isPunctuationOrSymbolCode(previous)
+                    ? 2
+                    : 0;
+                const afterClass = isWhitespaceOrNullCode(afterCode)
+                  ? 1
+                  : isPunctuationOrSymbolCode(afterCode)
+                    ? 2
+                    : 0;
+                const open = Boolean(token._open) || afterClass === 2;
+                const close = Boolean(token._close) || beforeClass === 2;
+                token._open = Boolean(
+                  marker === 42 ? open : open && (beforeClass > 0 || !close)
+                );
+                token._close = Boolean(
+                  marker === 42 ? close : close && (afterClass > 0 || !open)
+                );
+              }
+            }
+            return ok(afterCode);
+          },
+          nok
+        )(code);
+      };
+    },
+  };
+
+  const cjkStrikethrough = {
+    name: 'cjkStrikethrough',
+    resolveAll(events: any[], context: any) {
+      const base = findBaseConstruct(context, 126, 'strikethrough');
+      return base && typeof base.resolveAll === 'function'
+        ? base.resolveAll(events, context)
+        : events;
+    },
+    tokenize(this: any, effects: any, ok: any, nok: any) {
+      const self = this;
+      const previous = self.previous;
+      return (code: number) => {
+        const base = findBaseConstruct(self, 126, 'strikethrough');
+        if (!base) return nok(code);
+        return base.tokenize.call(
+          self,
+          effects,
+          (afterCode: number | null) => {
+            const lastEvent = self.events[self.events.length - 1];
+            const token = lastEvent?.[1];
+            if (token && token.type === 'strikethroughSequenceTemporary') {
+              if (isCjkOrFullwidthCode(previous) || isCjkOrFullwidthCode(afterCode)) {
+                if (isPunctuationOrSymbolCode(afterCode)) {
+                  token._open = true;
+                }
+                if (isPunctuationOrSymbolCode(previous)) {
+                  token._close = true;
+                }
+              }
+            }
+            return ok(afterCode);
+          },
+          nok
+        )(code);
+      };
+    },
+  };
+
+  micromarkExtensions.push({
+    text: {
+      42: cjkAttention,
+      95: cjkAttention,
+      126: cjkStrikethrough,
+    },
+    insideSpan: {
+      null: [cjkAttention, cjkStrikethrough],
+    },
+  });
+}
+
 function stripTableInternalWhitespace() {
   return (tree: any) => {
     if (Array.isArray(tree.children)) {
@@ -143,10 +274,255 @@ function stripTableInternalWhitespace() {
   };
 }
 
+function isWhitespaceText(node: any): boolean {
+  return node?.type === 'text' && typeof node.value === 'string' && node.value.trim() === '';
+}
+
+function extractNodePlainText(node: any): string {
+  if (!node) return '';
+  if (node.type === 'text') return typeof node.value === 'string' ? node.value : '';
+  if (Array.isArray(node.children)) {
+    return node.children.map(extractNodePlainText).join('');
+  }
+  return '';
+}
+
+function containsImgElement(node: any): boolean {
+  if (!node || typeof node !== 'object') return false;
+  if (node.type === 'element' && node.tagName === 'img') return true;
+  if (Array.isArray(node.children)) {
+    return node.children.some(containsImgElement);
+  }
+  return false;
+}
+
+function transformImageCaptionsInContainer(children: any[]): any[] {
+  // First pass: split same-paragraph `<p><img ...>\nCaption</p>` and unwrap `<figure>`
+  const expanded: any[] = [];
+  for (const node of children) {
+    if (node?.type === 'element' && node.tagName === 'figure' && Array.isArray(node.children)) {
+      let mediaImg: Element | null = null;
+      let captionChildren: any[] | null = null;
+      let captionPos: any = undefined;
+      for (const child of node.children) {
+        if (child?.type === 'element' && child.tagName === 'img' && !mediaImg) {
+          mediaImg = child;
+        } else if (child?.type === 'element' && child.tagName === 'p' && !mediaImg) {
+          const nonWs = (child.children || []).filter((c: any) => !isWhitespaceText(c));
+          if (nonWs.length === 1 && nonWs[0].type === 'element' && nonWs[0].tagName === 'img') {
+            mediaImg = nonWs[0];
+          }
+        } else if (child?.type === 'element' && child.tagName === 'figcaption') {
+          captionChildren = child.children || [];
+          captionPos = child.position || node.position;
+        }
+      }
+      if (mediaImg && captionChildren && extractNodePlainText({ children: captionChildren }).trim().length > 0) {
+        expanded.push({
+          type: 'element',
+          tagName: 'p',
+          properties: { className: ['morph-p', 'morph-figure-media'] },
+          children: [mediaImg],
+          position: mediaImg.position || node.position,
+        });
+        expanded.push({
+          type: 'element',
+          tagName: 'p',
+          properties: { className: ['morph-caption'] },
+          children: captionChildren,
+          position: captionPos,
+        });
+        continue;
+      }
+    }
+
+    if (node?.type === 'element' && node.tagName === 'p' && Array.isArray(node.children)) {
+      const kids = node.children;
+      let firstIdx = 0;
+      while (firstIdx < kids.length && isWhitespaceText(kids[firstIdx])) {
+        firstIdx++;
+      }
+      const firstChild = kids[firstIdx];
+      if (firstChild?.type === 'element' && firstChild.tagName === 'img') {
+        const rest = kids.slice(firstIdx + 1);
+        let captionRest: any[] | null = null;
+        if (rest.length > 0) {
+          if (rest[0]?.type === 'text' && typeof rest[0].value === 'string') {
+            const nlMatch = rest[0].value.match(/^[^\S\r\n]*\r?\n([\s\S]*)$/);
+            if (nlMatch) {
+              const trimmedFirst = nlMatch[1].replace(/^[\s\u3000]+/, '');
+              captionRest = [
+                ...(trimmedFirst ? [{ ...rest[0], value: trimmedFirst }] : []),
+                ...rest.slice(1),
+              ];
+            }
+          } else {
+            let brIdx = 0;
+            while (brIdx < rest.length && isWhitespaceText(rest[brIdx])) {
+              brIdx++;
+            }
+            if (rest[brIdx]?.type === 'element' && rest[brIdx].tagName === 'br') {
+              const afterBr = rest.slice(brIdx + 1);
+              if (afterBr[0]?.type === 'text' && typeof afterBr[0].value === 'string') {
+                const trimmed = afterBr[0].value.replace(/^[\s\u3000]+/, '');
+                captionRest = [
+                  ...(trimmed ? [{ ...afterBr[0], value: trimmed }] : []),
+                  ...afterBr.slice(1),
+                ];
+              } else {
+                captionRest = afterBr;
+              }
+            }
+          }
+        }
+
+        if (
+          captionRest &&
+          !captionRest.some(containsImgElement) &&
+          extractNodePlainText({ children: captionRest }).trim().length > 0
+        ) {
+          const imgPos = firstChild.position;
+          const nodePos = node.position;
+          const capStartLine = imgPos
+            ? Math.min(nodePos?.end.line ?? imgPos.end.line + 1, imgPos.end.line + 1)
+            : nodePos?.start.line ?? 1;
+          expanded.push({
+            type: 'element',
+            tagName: 'p',
+            properties: {
+              ...(node.properties || {}),
+              className: ['morph-p', 'morph-figure-media'],
+            },
+            children: [firstChild],
+            position: imgPos || nodePos,
+          });
+          expanded.push({
+            type: 'element',
+            tagName: 'p',
+            properties: {
+              className: ['morph-caption'],
+            },
+            children: captionRest,
+            position: nodePos
+              ? {
+                  start: {
+                    line: capStartLine,
+                    column: 1,
+                    offset:
+                      imgPos?.end.offset !== undefined
+                        ? imgPos.end.offset + 1
+                        : nodePos.start.offset,
+                  },
+                  end: { ...nodePos.end },
+                }
+              : undefined,
+          });
+          continue;
+        }
+      }
+    }
+
+    expanded.push(node);
+  }
+
+  // Second pass: pair standalone `<p><img ...></p>` with adjacent caption block or image `title`
+  const out: any[] = [];
+  for (let i = 0; i < expanded.length; i++) {
+    const node = expanded[i];
+    if (node?.type === 'element' && node.tagName === 'p' && Array.isArray(node.children)) {
+      const props = (node.properties || (node.properties = {})) as Record<string, unknown>;
+      const clsList = Array.isArray(props.className) ? props.className : [];
+      const nonWs = node.children.filter((c: any) => !isWhitespaceText(c));
+      if (
+        !clsList.includes('morph-figure-media') &&
+        !clsList.includes('morph-caption') &&
+        nonWs.length === 1 &&
+        nonWs[0]?.type === 'element' &&
+        nonWs[0].tagName === 'img'
+      ) {
+        const imgNode = nonWs[0] as Element;
+        let nextIdx = i + 1;
+        while (nextIdx < expanded.length && isWhitespaceText(expanded[nextIdx])) {
+          nextIdx++;
+        }
+        const nextNode = expanded[nextIdx];
+        let matchedAdjacentCaption = false;
+
+        if (nextNode?.type === 'element' && !containsImgElement(nextNode)) {
+          if (nextNode.tagName === 'figcaption') {
+            ensureClass(props, 'morph-p');
+            ensureClass(props, 'morph-figure-media');
+            nextNode.tagName = 'p';
+            nextNode.properties = {
+              ...(nextNode.properties || {}),
+              className: ['morph-caption'],
+            };
+            matchedAdjacentCaption = true;
+          } else if (nextNode.tagName === 'p' && Array.isArray(nextNode.children)) {
+            const nextProps = (nextNode.properties || {}) as Record<string, unknown>;
+            const nextCls = Array.isArray(nextProps.className) ? nextProps.className : [];
+            if (!nextCls.includes('morph-caption')) {
+              const nextNonWs = nextNode.children.filter((c: any) => !isWhitespaceText(c));
+              const nextPlain = extractNodePlainText(nextNode).trim();
+              if (
+                nextNonWs.length === 1 &&
+                nextNonWs[0]?.type === 'element' &&
+                nextNonWs[0].tagName === 'em' &&
+                nextPlain.length > 0
+              ) {
+                ensureClass(props, 'morph-p');
+                ensureClass(props, 'morph-figure-media');
+                nextNode.children = nextNonWs[0].children || [];
+                nextNode.properties = {
+                  ...nextProps,
+                  className: ['morph-caption'],
+                };
+                matchedAdjacentCaption = true;
+              }
+            }
+          }
+        }
+
+        if (!matchedAdjacentCaption) {
+          const imgProps = (imgNode.properties || {}) as Record<string, unknown>;
+          const titleText = typeof imgProps.title === 'string' ? imgProps.title.trim() : '';
+          const altText = typeof imgProps.alt === 'string' ? imgProps.alt.trim() : '';
+          const captionText = titleText || altText;
+          if (captionText.length > 0) {
+            ensureClass(props, 'morph-p');
+            ensureClass(props, 'morph-figure-media');
+            out.push(node);
+            out.push({
+              type: 'element',
+              tagName: 'p',
+              properties: {
+                className: ['morph-caption'],
+              },
+              children: [{ type: 'text', value: captionText }],
+              position: imgNode.position || node.position,
+            });
+            continue;
+          }
+        }
+      }
+    }
+    out.push(node);
+  }
+
+  return out;
+}
+
+function transformImageCaptions(tree: Root): void {
+  if (Array.isArray(tree.children)) {
+    tree.children = transformImageCaptionsInContainer(tree.children);
+  }
+}
+
 const BASE_PROCESSOR = unified()
   .use(remarkParse)
   .use(remarkGfm)
   .use(remarkMath)
+  .use(remarkCjkFriendly)
   .use(normalizeOrphanTableHtml)
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(stripTableInternalWhitespace)
@@ -173,6 +549,9 @@ function runCompile(
   // 3. Transform KaTeX math and Shiki code blocks
   transformMathAndCode(rawHast, options, highlighter, diagnostics, isSyncFallback);
 
+  // 3.5. Transform Notion-style image captions
+  transformImageCaptions(rawHast);
+
   // 4. Map semantic classes & images
   visit(rawHast, 'element', (node: Element) => {
     const props = (node.properties || (node.properties = {})) as Record<string, unknown>;
@@ -184,7 +563,10 @@ function runCompile(
     if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(node.tagName)) {
       ensureClass(props, `morph-${node.tagName}`);
     } else if (node.tagName === 'p') {
-      ensureClass(props, 'morph-p');
+      const clsList = Array.isArray(props.className) ? props.className : [];
+      if (!clsList.includes('morph-caption')) {
+        ensureClass(props, 'morph-p');
+      }
     } else if (node.tagName === 'blockquote') {
       ensureClass(props, 'morph-quote');
     } else if (node.tagName === 'ul' || node.tagName === 'ol') {

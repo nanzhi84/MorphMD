@@ -257,6 +257,11 @@ function finalizeSnapshot(
             img.setAttribute('data-morph-snapshot-src', deliveryUrl);
           }
 
+          if (targetId === 'cards' && record.width && record.width > 0 && record.height && record.height > 0) {
+            if (!img.hasAttribute('width')) img.setAttribute('width', String(record.width));
+            if (!img.hasAttribute('height')) img.setAttribute('height', String(record.height));
+          }
+
           if (targetId === 'wechat' && record.width && record.width > 0) {
             if (record.height && record.height > 0) {
               img.setAttribute('data-ratio', String(Number((record.height / record.width).toFixed(6))));

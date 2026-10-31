@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -71,6 +71,7 @@ function installDomGlobals(dom: JSDOM): void {
     Event: win.Event,
     CustomEvent: win.CustomEvent,
     MouseEvent: win.MouseEvent,
+    WheelEvent: win.WheelEvent,
     KeyboardEvent: win.KeyboardEvent,
     DOMParser: win.DOMParser,
     XMLSerializer: win.XMLSerializer,
@@ -367,6 +368,11 @@ describe('TestTargetSwitchingAndCardsReflow', () => {
     expect(previewStage.getAttribute('data-target-view')).toBe('cards');
     expect(primaryBtn.textContent).toContain('导出高清卡片');
     expect(previewStage.querySelectorAll('.morph-card-page').length).toBeGreaterThanOrEqual(1);
+    expect(
+      previewStage.querySelectorAll(
+        '.morph-card-header, .morph-card-footer, [data-morph-generated="header"], [data-morph-generated="footer"]'
+      )
+    ).toHaveLength(0);
     expect(previewStage.querySelector('.morph-card-page a[href="https://morphmd.dev"]')).toBeNull();
     const cardLinkText = previewStage.querySelector<HTMLElement>(
       '.morph-card-page .morph-link-text[data-original-href="https://morphmd.dev"]'
@@ -481,7 +487,7 @@ describe('TestEditorInputToolbarAndAssetPaste', () => {
     }
   });
 
-  it('test_undo_and_redo_buttons_revert_and_restore_committed_document_states', async () => {
+  it('test_header_omits_redundant_buttons_while_session_undo_and_redo_sync_workbench_state', async () => {
     const store = assetStore();
     const session = createEditorSession({
       assetStore: store,
@@ -495,6 +501,11 @@ describe('TestEditorInputToolbarAndAssetPaste', () => {
       debounceMs: 10,
     });
 
+    expect(container.querySelector('[data-testid="zoom-select"]')).toBeNull();
+    expect(container.querySelector('[data-testid="undo-btn"]')).toBeNull();
+    expect(container.querySelector('[data-testid="redo-btn"]')).toBeNull();
+    expect(container.querySelector('[data-testid="export-package-btn"]')).toBeNull();
+
     const previewStage = getByTestId(container, 'preview-stage');
     expect(previewStage.textContent).toContain('历史状态一');
 
@@ -506,12 +517,18 @@ describe('TestEditorInputToolbarAndAssetPaste', () => {
     );
     expect(previewStage.textContent).toContain('历史状态二');
 
-    await clickTestId(container, 'undo-btn', session);
+    await act(async () => {
+      session.undo();
+    });
+    await flushWorkbench(session);
     const markdownInput = getByTestId<HTMLTextAreaElement>(container, 'markdown-input');
     expect(markdownInput.value).toContain('历史状态一');
     expect(previewStage.textContent).toContain('历史状态一');
 
-    await clickTestId(container, 'redo-btn', session);
+    await act(async () => {
+      session.redo();
+    });
+    await flushWorkbench(session);
     expect(markdownInput.value).toContain('历史状态二');
     expect(previewStage.textContent).toContain('历史状态二');
   });
@@ -565,6 +582,116 @@ describe('TestEditorInputToolbarAndAssetPaste', () => {
 
     const statusAssetCount = getByTestId(container, 'status-asset-count');
     expect(statusAssetCount.textContent).toMatch(/[1-9]/);
+  });
+
+  it('test_pasting_image_at_middle_cursor_position_inserts_asset_before_caption_and_renders_tight_muted_caption_style', async () => {
+    const store = assetStore();
+    const beforeCursor = '### 一、 IP、端口与 DNS\n\n';
+    const afterCursor = [
+      '图 1　IP、端口与 DNS 知识结构：左侧是找到机器和进程的 IP、网卡、端口与监听，右侧是把域名翻译成 IP 的 DNS 体系',
+      '',
+      '- **IP 地址：互联网中每台联网设备都通过数字坐标进行寻址定位。**',
+    ].join('\n');
+    const initialMarkdown = `${beforeCursor}${afterCursor}`;
+    const cursorOffset = beforeCursor.length;
+
+    const session = createEditorSession({
+      assetStore: store,
+      initialMarkdown,
+      debounceMs: 10,
+    });
+
+    const { container } = await mountWorkbench({
+      session,
+      assetStore: store,
+      debounceMs: 10,
+    });
+
+    const markdownInput = getByTestId<HTMLTextAreaElement>(container, 'markdown-input');
+    markdownInput.selectionStart = cursorOffset;
+    markdownInput.selectionEnd = cursorOffset;
+
+    const rawPng = png(2, 24, 16);
+    const imageFile = new File([new Uint8Array(rawPng)], 'knowledge-map.png', {
+      type: 'image/png',
+    });
+
+    await act(async () => {
+      const pasteEvent = new window.Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(pasteEvent, 'clipboardData', {
+        value: {
+          files: [imageFile],
+          items: [
+            {
+              kind: 'file',
+              type: 'image/png',
+              getAsFile: () => imageFile,
+            },
+          ],
+          getData: () => '',
+        },
+      });
+      markdownInput.dispatchEvent(pasteEvent);
+    });
+    await flushWorkbench(session, 60);
+
+    const headingIdx = markdownInput.value.indexOf('### 一、 IP、端口与 DNS');
+    const assetIdx = markdownInput.value.indexOf('morph-asset://');
+    const captionIdx = markdownInput.value.indexOf('图 1　IP、端口与 DNS 知识结构');
+    const listIdx = markdownInput.value.indexOf('- **IP 地址');
+
+    expect(assetIdx).toBeGreaterThan(headingIdx);
+    expect(assetIdx).toBeLessThan(captionIdx);
+    expect(assetIdx).toBeLessThan(listIdx);
+
+    const assetUriMatch = markdownInput.value.match(/morph-asset:\/\/[a-zA-Z0-9_-]+/);
+    expect(assetUriMatch).not.toBeNull();
+    const captionText =
+      '图 1　IP、端口与 DNS 知识结构：左侧是找到机器和进程的 IP、网卡、端口与监听，右侧是把域名翻译成 IP 的 DNS 体系';
+    await setControlValue(
+      container,
+      'markdown-input',
+      [
+        '### 一、 IP、端口与 DNS',
+        '',
+        `![${captionText}](${assetUriMatch![0]})`,
+        '',
+        '- **IP 地址：互联网中每台联网设备都通过数字坐标进行寻址定位。**',
+      ].join('\n'),
+      session
+    );
+
+    const previewStage = getByTestId(container, 'preview-stage');
+    const mediaPara = previewStage.querySelector<HTMLElement>('p.morph-figure-media');
+    const captionPara = previewStage.querySelector<HTMLElement>('p.morph-caption');
+
+    evidence('workbench-image-paste-cursor-and-caption', {
+      markdownValue: markdownInput.value,
+      headingIdx,
+      assetIdx,
+      captionIdx,
+      listIdx,
+      mediaClass: mediaPara?.className ?? null,
+      mediaStyle: mediaPara?.getAttribute('style') ?? null,
+      captionClass: captionPara?.className ?? null,
+      captionStyle: captionPara?.getAttribute('style') ?? null,
+      captionText: captionPara?.textContent ?? null,
+    });
+
+    expect(mediaPara).not.toBeNull();
+    expect(mediaPara!.querySelector('img')).not.toBeNull();
+    expect(mediaPara!.style.marginBottom).toBe('6px');
+
+    expect(captionPara).not.toBeNull();
+    expect(mediaPara!.nextElementSibling).toBe(captionPara);
+    expect(captionPara!.textContent).toContain('图 1　IP、端口与 DNS 知识结构');
+    expect(captionPara!.style.fontSize).toBe('13px');
+    expect(captionPara!.style.lineHeight).toBe('1.5');
+    expect(captionPara!.style.marginTop).toBe('0px');
+    expect(captionPara!.style.marginBottom).toBe('16px');
+    expect(captionPara!.style.color.toLowerCase()).toMatch(
+      /^(#787774|#8c857b|rgb\(120,\s*119,\s*116\)|rgb\(140,\s*133,\s*123\))$/
+    );
   });
 });
 
@@ -1194,7 +1321,7 @@ describe('TestBottomLeftDiagnosticsPopover', () => {
 });
 
 describe('TestDeliveryCopyAndExport', () => {
-  it('test_clicking_primary_delivery_in_wechat_and_export_package_invokes_callbacks_with_valid_payloads', async () => {
+  it('test_clicking_primary_delivery_in_wechat_invokes_copy_callback_and_omits_header_export_package_button', async () => {
     const store = assetStore();
     const asset = await store.ingest(png(2, 20, 14), { fileName: 'cover-banner.png' });
     const session = createEditorSession({
@@ -1204,14 +1331,12 @@ describe('TestDeliveryCopyAndExport', () => {
     });
 
     const copiedPayloads: ClipboardPayload[] = [];
-    const exportedManifests: AssetPackageManifest[] = [];
 
     const { container } = await mountWorkbench({
       session,
       assetStore: store,
       debounceMs: 10,
       onCopyPayload: (payload) => copiedPayloads.push(payload),
-      onExportPackage: (manifest) => exportedManifests.push(manifest),
     });
 
     await clickTestId(container, 'primary-delivery-btn', session);
@@ -1222,12 +1347,12 @@ describe('TestDeliveryCopyAndExport', () => {
       asset.dataUrl
     );
 
-    await clickTestId(container, 'export-package-btn', session);
-    expect(exportedManifests).toHaveLength(1);
-    expect(exportedManifests[0].rewrittenContent).toContain('./assets/');
-    expect(exportedManifests[0].rewrittenContent).not.toContain(asset.uri);
-    expect(exportedManifests[0].assets).toHaveLength(1);
-    expect(exportedManifests[0].assets[0].data.byteLength).toBeGreaterThan(0);
+    expect(container.querySelector('[data-testid="export-package-btn"]')).toBeNull();
+    const manifest = store.exportPackageManifest(session.getCommittedMarkdown());
+    expect(manifest.rewrittenContent).toContain('./assets/');
+    expect(manifest.rewrittenContent).not.toContain(asset.uri);
+    expect(manifest.assets).toHaveLength(1);
+    expect(manifest.assets[0].data.byteLength).toBeGreaterThan(0);
   });
 
   it('test_clicking_primary_delivery_in_cards_mode_exports_valid_zip_archive_with_png_pages', async () => {
@@ -1823,5 +1948,411 @@ describe('class TestWorkbenchUi', () => {
         expect(block.style.marginTop).toBe('0px');
       }
     }
+  });
+
+  it('test_header_actions_render_status_dot_userscript_pill_and_transition_from_amber_uninstalled_to_emerald_ready', async () => {
+    const cssText = readFileSync(resolve(__dirname, '../src/styles/workbench.css'), 'utf-8');
+    const styleEl = document.createElement('style');
+    styleEl.textContent = cssText;
+    document.head.appendChild(styleEl);
+
+    delete (window as unknown as Record<string, unknown>).__MORPHMD_USERSCRIPT_READY__;
+
+    const { container } = await mountWorkbench();
+
+    // Redundant buttons are omitted from the header
+    expect(container.querySelector('[data-testid="zoom-select"]')).toBeNull();
+    expect(container.querySelector('[data-testid="undo-btn"]')).toBeNull();
+    expect(container.querySelector('[data-testid="redo-btn"]')).toBeNull();
+    expect(container.querySelector('[data-testid="export-package-btn"]')).toBeNull();
+
+    const pill = getByTestId<HTMLAnchorElement>(container, 'x-userscript-pill');
+    const primaryBtn = getByTestId(container, 'primary-delivery-btn');
+    const styleDrawerBtn = getByTestId(container, 'toggle-style-drawer-btn');
+
+    expect(pill.tagName).toBe('A');
+    expect(pill.getAttribute('href')).toContain('morphmd-x-paste.user.js');
+    expect(pill.getAttribute('target')).toBe('_blank');
+    expect(pill.nextElementSibling).toBe(primaryBtn);
+    expect(primaryBtn.nextElementSibling).toBe(styleDrawerBtn);
+
+    const dot = getByTestId(pill, 'x-userscript-dot');
+    const label = getByTestId(pill, 'x-userscript-label');
+
+    // No emoji characters allowed in pill
+    expect(pill.textContent || '').not.toMatch(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/u);
+
+    // 1. Uninstalled state (amber dot #f59e0b + 1px border + "安装 X 贴图脚本")
+    expect(pill.getAttribute('data-status')).toBe('uninstalled');
+    expect(pill.classList.contains('is-uninstalled')).toBe(true);
+    expect(label.textContent).toContain('安装 X 贴图脚本');
+
+    const uninstalledDotStyle = window.getComputedStyle(dot);
+    expect(uninstalledDotStyle.backgroundColor.toLowerCase()).toMatch(
+      /#f59e0b|rgb\(245,\s*158,\s*11\)/
+    );
+    expect(uninstalledDotStyle.borderRadius).toBe('50%');
+    const dotSize = parseFloat(uninstalledDotStyle.width);
+    expect(dotSize).toBeGreaterThanOrEqual(6);
+    expect(dotSize).toBeLessThanOrEqual(8);
+
+    const pillStyle = window.getComputedStyle(pill);
+    expect(pillStyle.borderWidth || pillStyle.borderTopWidth).toBe('1px');
+
+    // 2. Ready state via window flag + morphmd:userscript-ready event (emerald dot #10b981 + glow + "X 贴图脚本已就绪")
+    await act(async () => {
+      (window as unknown as Record<string, unknown>).__MORPHMD_USERSCRIPT_READY__ = true;
+      window.dispatchEvent(new window.CustomEvent('morphmd:userscript-ready'));
+    });
+
+    expect(pill.getAttribute('data-status')).toBe('ready');
+    expect(pill.classList.contains('is-ready')).toBe(true);
+    expect(label.textContent).toContain('X 贴图脚本已就绪');
+    expect(pill.textContent || '').not.toMatch(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/u);
+
+    const readyDotStyle = window.getComputedStyle(dot);
+    expect(readyDotStyle.backgroundColor.toLowerCase()).toMatch(
+      /#10b981|rgb\(16,\s*185,\s*129\)/
+    );
+    expect(readyDotStyle.boxShadow.toLowerCase()).toMatch(/rgba?\(16,\s*185,\s*129|#10b981/);
+  });
+
+  it('test_preview_scroll_container_responds_to_mac_trackpad_pinch_wheel_events_with_smooth_zoom_clamping', async () => {
+    const { container } = await mountWorkbench();
+
+    const previewScroll = getByTestId(container, 'preview-scroll');
+    const previewStage = getByTestId(container, 'preview-stage');
+
+    expect(previewStage.getAttribute('data-zoom-scale')).toBe('1');
+    expect(previewStage.style.getPropertyValue('--stage-zoom')).toBe('1');
+
+    // Regular scroll without ctrlKey/metaKey does not zoom or preventDefault
+    let regularEventPrevented = false;
+    await act(async () => {
+      const regularWheel = new window.WheelEvent('wheel', {
+        deltaY: 40,
+        ctrlKey: false,
+        metaKey: false,
+        bubbles: true,
+        cancelable: true,
+      });
+      previewScroll.dispatchEvent(regularWheel);
+      regularEventPrevented = regularWheel.defaultPrevented;
+    });
+    expect(regularEventPrevented).toBe(false);
+    expect(previewStage.getAttribute('data-zoom-scale')).toBe('1');
+
+    // Trackpad pinch-out (ctrlKey: true, negative deltaY) zooms in smoothly
+    let pinchInPrevented = false;
+    await act(async () => {
+      const pinchZoomIn = new window.WheelEvent('wheel', {
+        deltaY: -25,
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      previewScroll.dispatchEvent(pinchZoomIn);
+      pinchInPrevented = pinchZoomIn.defaultPrevented;
+    });
+    expect(pinchInPrevented).toBe(true);
+    const zoomedInScale = parseFloat(previewStage.getAttribute('data-zoom-scale') || '1');
+    expect(zoomedInScale).toBeGreaterThan(1);
+    expect(parseFloat(previewStage.style.getPropertyValue('--stage-zoom'))).toBeCloseTo(
+      zoomedInScale,
+      3
+    );
+
+    // Trackpad pinch-in (metaKey: true, positive deltaY) zooms out smoothly
+    await act(async () => {
+      const pinchZoomOut = new window.WheelEvent('wheel', {
+        deltaY: 15,
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      previewScroll.dispatchEvent(pinchZoomOut);
+    });
+    const zoomedOutScale = parseFloat(previewStage.getAttribute('data-zoom-scale') || '1');
+    expect(zoomedOutScale).toBeLessThan(zoomedInScale);
+
+    // Clamping to upper bound 2.5 and lower bound 0.5
+    await act(async () => {
+      previewScroll.dispatchEvent(
+        new window.WheelEvent('wheel', {
+          deltaY: -500,
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    expect(parseFloat(previewStage.getAttribute('data-zoom-scale') || '0')).toBe(2.5);
+
+    await act(async () => {
+      previewScroll.dispatchEvent(
+        new window.WheelEvent('wheel', {
+          deltaY: 500,
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    expect(parseFloat(previewStage.getAttribute('data-zoom-scale') || '0')).toBe(0.5);
+  });
+
+  it('test_morph_select_css_insets_dropdown_arrow_from_right_border_with_custom_appearance', async () => {
+    const cssText = readFileSync(resolve(__dirname, '../src/styles/workbench.css'), 'utf-8');
+    const styleEl = document.createElement('style');
+    styleEl.textContent = cssText;
+    document.head.appendChild(styleEl);
+
+    const morphSelectBlockMatch = cssText.match(/\.morph-select\s*\{([\s\S]*?)\}/);
+    expect(morphSelectBlockMatch).not.toBeNull();
+    const morphSelectCss = morphSelectBlockMatch![1];
+    expect(morphSelectCss).toMatch(/appearance:\s*none/);
+    expect(morphSelectCss).toMatch(/background-image:\s*url\(/);
+    expect(morphSelectCss).toMatch(/background-position:\s*right\s+1[12]px\s+center/);
+    expect(morphSelectCss).toMatch(/background-repeat:\s*no-repeat/);
+
+    const { container } = await mountWorkbench({ initialTargetId: 'cards' });
+    const canvasSelect = getByTestId<HTMLSelectElement>(container, 'canvas-preset-select');
+    const computedSelect = window.getComputedStyle(canvasSelect);
+    expect(parseFloat(computedSelect.paddingRight)).toBeGreaterThanOrEqual(28);
+  });
+
+  it('test_userscript_file_exists_and_implements_workbench_handshake_and_x_article_image_upload_pipeline', async () => {
+    const scriptPath = resolve(__dirname, '../public/morphmd-x-paste.user.js');
+    expect(existsSync(scriptPath)).toBe(true);
+
+    const scriptContent = readFileSync(scriptPath, 'utf-8');
+    expect(scriptContent).toContain('// ==UserScript==');
+    expect(scriptContent).toContain('// ==/UserScript==');
+    expect(scriptContent).toContain('@match        https://x.com/*');
+    expect(scriptContent).toContain('@match        https://twitter.com/*');
+    expect(scriptContent).toContain('__MORPHMD_USERSCRIPT_READY__');
+    expect(scriptContent).toContain('morphmd:userscript-ready');
+    expect(scriptContent).toContain('DataTransfer');
+    expect(scriptContent).toContain("new ClipboardEvent('paste'");
+
+    // Issue #7: 1. 行内公式转 Unicode 文本节点逻辑
+    expect(scriptContent).toContain('texToInlineUnicode');
+    // Issue #7: 2. Callout / 多段 blockquote 内部 <p> 之间插入 <br> 换行逻辑
+    expect(scriptContent).toContain('normalizeBlockquotesForX');
+    // Issue #7: 3. <pre> 代码块自动光栅化为高清代码卡片图片逻辑
+    expect(scriptContent).toContain('renderCodeBlockToDataUrl');
+    expect(scriptContent).toMatch(/data-raster-type['",\s]+code/);
+    // Issue #7: 4. 逆序上传循环、媒体块挂载等待与 XIMGPH_ 占位符锚定逻辑
+    expect(scriptContent).toContain('for (let i = tasks.length - 1; i >= 0; i--)');
+    expect(scriptContent).toContain('waitForMediaBlockInsertion');
+    expect(scriptContent).toContain('countEditorMediaNodes');
+    expect(scriptContent).toContain('XIMGPH_');
+
+    // 在 JSDOM 仿真 X Articles 编辑器环境中执行粘贴管线验证
+    const xDom = new JSDOM(
+      '<!doctype html><html><body><div class="public-DraftEditor-content" contenteditable="true"></div></body></html>',
+      { url: 'https://x.com/compose/article' }
+    );
+    const xWin = xDom.window;
+    const xDoc = xWin.document;
+    const samplePngDataUrl = `data:image/png;base64,${Buffer.from(png(1, 16, 16)).toString('base64')}`;
+
+    const mockCtx = new Proxy(
+      {
+        measureText: (text: string) => ({ width: String(text || '').length * 8 }),
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+      },
+      {
+        get(target, prop) {
+          if (prop in target) return (target as any)[prop];
+          return () => {};
+        },
+        set(target, prop, value) {
+          (target as any)[prop] = value;
+          return true;
+        },
+      }
+    );
+
+    (xWin.HTMLCanvasElement.prototype as any).getContext = () => mockCtx;
+    (xWin.HTMLCanvasElement.prototype as any).toDataURL = () => samplePngDataUrl;
+    (xWin.HTMLCanvasElement.prototype as any).toBlob = (cb: (b: Blob | null) => void, mime = 'image/png') => {
+      cb(new Blob([new Uint8Array(png(1, 16, 16))], { type: mime }));
+    };
+
+    class MockImage {
+      width = 1360;
+      height = 400;
+      naturalWidth = 1360;
+      naturalHeight = 400;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      private _src = '';
+      get src() {
+        return this._src;
+      }
+      set src(val: string) {
+        this._src = val;
+        Promise.resolve().then(() => {
+          if (this.onload) this.onload();
+        });
+      }
+      decode() {
+        return Promise.resolve();
+      }
+      addEventListener(type: string, cb: () => void) {
+        if (type === 'load') this.onload = cb;
+        if (type === 'error') this.onerror = cb;
+      }
+    }
+
+    class MockDataTransfer {
+      private dataMap = new Map<string, string>();
+      files: File[] = [];
+      items = {
+        add: (file: File) => {
+          this.files.push(file);
+        },
+      };
+      setData(type: string, val: string) {
+        this.dataMap.set(type, val);
+      }
+      getData(type: string) {
+        return this.dataMap.get(type) || '';
+      }
+    }
+
+    class MockClipboardEvent extends xWin.Event {
+      clipboardData: MockDataTransfer;
+      constructor(type: string, init?: { bubbles?: boolean; cancelable?: boolean; clipboardData?: MockDataTransfer }) {
+        super(type, { bubbles: init?.bubbles, cancelable: init?.cancelable });
+        this.clipboardData = init?.clipboardData || new MockDataTransfer();
+      }
+    }
+
+    const fastSetTimeout = (fn: (...args: any[]) => void) => setTimeout(fn, 1);
+
+    const runner = new Function(
+      'window',
+      'unsafeWindow',
+      'document',
+      'DOMParser',
+      'NodeFilter',
+      'Event',
+      'CustomEvent',
+      'MouseEvent',
+      'ClipboardEvent',
+      'DataTransfer',
+      'Image',
+      'File',
+      'Blob',
+      'Uint8Array',
+      'atob',
+      'btoa',
+      'setTimeout',
+      'clearTimeout',
+      scriptContent
+    );
+
+    runner(
+      xWin,
+      xWin,
+      xDoc,
+      xWin.DOMParser,
+      xWin.NodeFilter,
+      xWin.Event,
+      xWin.CustomEvent,
+      xWin.MouseEvent,
+      MockClipboardEvent,
+      MockDataTransfer,
+      MockImage,
+      File,
+      Blob,
+      Uint8Array,
+      atob,
+      btoa,
+      fastSetTimeout,
+      clearTimeout
+    );
+
+    const editorEl = xDoc.querySelector('.public-DraftEditor-content') as HTMLElement;
+    (editorEl as any).focus = () => {};
+    (xDoc as any).execCommand = () => true;
+
+    let capturedSanitizedHtml = '';
+    const uploadedFileNames: string[] = [];
+
+    editorEl.addEventListener('paste', (evt: any) => {
+      if (!evt.__morphSynthetic) return;
+      const html = evt.clipboardData?.getData('text/html') || '';
+      if (html) {
+        capturedSanitizedHtml = html;
+        editorEl.innerHTML = html;
+      } else if (evt.clipboardData?.files?.length > 0) {
+        uploadedFileNames.push(evt.clipboardData.files[0].name);
+        const mediaEl = xDoc.createElement('div');
+        mediaEl.setAttribute('data-testid', 'tweetPhoto');
+        editorEl.appendChild(mediaEl);
+      }
+    });
+
+    const inputHtml = [
+      `<p>原稿语义零篡改（信息守恒率 <img data-morph-rasterized="true" data-raster-type="math" data-math-display="inline" data-math-tex="\\eta = 1.0" alt="\\eta = 1.0" src="${samplePngDataUrl}" />）。</p>`,
+      '<blockquote class="morph-quote morph-callout"><p><strong>样式内联提示</strong></p><p>微信公众号编辑器会自动剥离外部样式表。</p></blockquote>',
+      '<ul><li><section><strong>IP 地址：给每一台联网设备分配的门牌号</strong></section><ul><li><section>第一类是<strong>公网 IP</strong>（如 <code>203.0.113.50</code>）</section></li><li><section>第二类是<strong>局域网/内网 IP</strong>（如 <code>192.168.x.x</code>）</section></li></ul></li></ul>',
+      `<p data-morph-raster-container="table"><img data-morph-rasterized="true" data-raster-type="table" alt="表格" src="${samplePngDataUrl}" /></p>`,
+      '<pre class="morph-code"><code class="language-ts">const x: number = 1;</code></pre>',
+      `<p><img data-morph-rasterized="true" data-raster-type="math" data-math-display="block" data-math-tex="E = mc^2" alt="E = mc^2" src="${samplePngDataUrl}" /></p>`,
+    ].join('');
+
+    const dt = new MockDataTransfer();
+    dt.setData('text/html', inputHtml);
+    dt.setData('text/plain', '原稿语义零篡改');
+
+    const initialPaste = new MockClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: dt,
+    });
+    editorEl.dispatchEvent(initialPaste);
+
+    await new Promise((r) => setTimeout(r, 80));
+
+    expect(capturedSanitizedHtml).toBeTruthy();
+    const parsedSanitized = new xWin.DOMParser().parseFromString(capturedSanitizedHtml, 'text/html');
+
+    // 1. 行内公式已原位转为 η = 1.0 文本，未产生孤立段落或占位符
+    const firstP = parsedSanitized.querySelector('p');
+    expect(firstP?.textContent).toContain('原稿语义零篡改（信息守恒率 η = 1.0）。');
+
+    // 2. Callout blockquote 内层 <p> 已解包并在标题与正文间插入 <br>
+    const bq = parsedSanitized.querySelector('blockquote');
+    expect(bq).not.toBeNull();
+    expect(bq!.querySelectorAll('p')).toHaveLength(0);
+    expect(bq!.querySelector('br')).not.toBeNull();
+    expect(bq!.textContent).toContain('样式内联提示');
+    expect(bq!.textContent).toContain('微信公众号编辑器会自动剥离外部样式表。');
+
+    // 2b. 二级无序列表 <ul><li> 与 <section> 已解包并通过 <br>- 拍平至父级 <li>
+    expect(parsedSanitized.querySelectorAll('li ul')).toHaveLength(0);
+    expect(parsedSanitized.querySelectorAll('li section')).toHaveLength(0);
+    const parentLi = parsedSanitized.querySelector('ul > li');
+    expect(parentLi).not.toBeNull();
+    expect(parentLi!.querySelectorAll('br')).toHaveLength(2);
+    expect(parentLi!.innerHTML).toContain('<br>- ');
+    expect(parentLi!.querySelectorAll('strong')).toHaveLength(3);
+    expect(parentLi!.querySelectorAll('code')).toHaveLength(2);
+
+    // 3. 3 张块级图（表格 + 代码卡片 + 块级公式）生成 XIMGPH_0_END, XIMGPH_1_END, XIMGPH_2_END 占位符，并按逆序 (3 -> 2 -> 1) 上传
+    expect(capturedSanitizedHtml).toContain('XIMGPH_0_END');
+    expect(capturedSanitizedHtml).toContain('XIMGPH_1_END');
+    expect(capturedSanitizedHtml).toContain('XIMGPH_2_END');
+    expect(uploadedFileNames).toEqual([
+      'morphmd-figure-3.png',
+      'morphmd-figure-2.png',
+      'morphmd-figure-1.png',
+    ]);
+
+    xDom.window.close();
   });
 });

@@ -15,8 +15,8 @@ export const CARD_RATIO_PRESETS: Readonly<Record<CardAspectRatio, CardPresetConf
     layoutHeight: 960,
     exportScale: 2,
     padding: Object.freeze({ top: 48, right: 56, bottom: 48, left: 56 }),
-    headerHeight: 40,
-    footerHeight: 40,
+    headerHeight: 0,
+    footerHeight: 0,
   }),
   '4:5': Object.freeze({
     ratio: '4:5',
@@ -27,8 +27,8 @@ export const CARD_RATIO_PRESETS: Readonly<Record<CardAspectRatio, CardPresetConf
     layoutHeight: 900,
     exportScale: 2,
     padding: Object.freeze({ top: 48, right: 56, bottom: 48, left: 56 }),
-    headerHeight: 40,
-    footerHeight: 40,
+    headerHeight: 0,
+    footerHeight: 0,
   }),
   '1:1': Object.freeze({
     ratio: '1:1',
@@ -39,8 +39,8 @@ export const CARD_RATIO_PRESETS: Readonly<Record<CardAspectRatio, CardPresetConf
     layoutHeight: 720,
     exportScale: 2,
     padding: Object.freeze({ top: 44, right: 56, bottom: 44, left: 56 }),
-    headerHeight: 36,
-    footerHeight: 36,
+    headerHeight: 0,
+    footerHeight: 0,
   }),
   '16:9': Object.freeze({
     ratio: '16:9',
@@ -51,8 +51,8 @@ export const CARD_RATIO_PRESETS: Readonly<Record<CardAspectRatio, CardPresetConf
     layoutHeight: 540,
     exportScale: 2,
     padding: Object.freeze({ top: 40, right: 64, bottom: 40, left: 64 }),
-    headerHeight: 40,
-    footerHeight: 40,
+    headerHeight: 0,
+    footerHeight: 0,
   }),
 });
 

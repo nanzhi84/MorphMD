@@ -1512,4 +1512,160 @@ describe('TestWeChatPipeline', () => {
       assetStore.clear();
     }
   });
+
+  // =========================================================================
+  // 维度 9：防止微信宿主 text-align: justify 导致含行内代码段落与嵌套列表字距异常拉伸
+  // =========================================================================
+  it('test_wechat_paragraphs_and_list_sections_inline_left_text_align_preventing_justify_character_stretching', async () => {
+    const assetStore = new AssetStore();
+    const markdown = [
+      '在本地调试前端项目时，如果直接访问 `http://localhost:3000` 或 `http://127.0.0.1:5173`，其它设备无法跨网卡路由。',
+      '',
+      '- 网络地址分类与真机调试说明：',
+      '  - 第二类是**局域网/内网 IP**（通常以 `192.168.x.x`、`10.x.x.x` 或 `172.16.x.x` 至 `172.31.x.x` 开头），仅在同一个家庭 Wi-Fi 或同一个云机房内部有效，外网无法直接寻址；',
+      '  - 真机访问实操两步：第一，启动电脑上的开发服务时加上 `--host 0.0.0.0` 参数（如 Vite 项目执行 `npm run dev -- --host`），让服务监听电脑的所有网卡（从而包含无线网卡）；第二，查看电脑无线网卡的局域网 IP（如 `192.168.1.5`），在手机浏览器直接输入目标地址 `http://192.168.1.5:3000`，即可在真机上实时看到网页效果。',
+      '',
+      '> 引用说明：即使外层容器设置了两端对齐，含 `192.168.1.5:3000` 的引用也不应拉伸字距。',
+      '',
+      '> [!TIP] 局域网联调提示',
+      '> 请确保手机与电脑连接在同一个频段的路由器下，并放行 `3000` 端口。',
+    ].join('\n');
+
+    try {
+      const anthropicSnap = await buildDeliverySnapshot(markdown, 'wechat', assetStore, {
+        customCss: THEME_PRESETS.default.presetCss,
+        tokens: THEME_PRESETS.default.tokens,
+      });
+
+      const yoryonPreset = DEFAULT_SAVED_CSS_PRESETS.find((p) => p.id === 'yoryon')!;
+      const yoryonSnap = await buildDeliverySnapshot(markdown, 'wechat', assetStore, {
+        customCss: yoryonPreset.css,
+        tokens: THEME_PRESETS.default.tokens,
+      });
+
+      for (const [, snap] of [
+        ['default', anthropicSnap],
+        ['yoryon', yoryonSnap],
+      ] as const) {
+        const verifyRes = await verifier.verifyHtml(snap.html);
+        expect(verifyRes).toEqual({ isValid: true, inValidInfo: {} });
+
+        const alignAudit = await page.evaluate((html) => {
+          document.body.innerHTML = `
+            <style>
+              body { margin: 0; padding: 0; }
+              .stage-row { display: flex; gap: 20px; align-items: flex-start; }
+              .box { width: 375px; padding: 0 16px; box-sizing: border-box; }
+              #preview-box .morph-doc { display: flow-root; }
+              #wechat-host-box {
+                font-size: 17px;
+                line-height: 1.6;
+                color: rgba(0, 0, 0, 0.9);
+                text-align: justify;
+              }
+              #wechat-host-box .list-paddingleft-1 {
+                margin: 0;
+                padding-left: 22px;
+              }
+            </style>
+            <div class="stage-row">
+              <div id="preview-box" class="box">${html}</div>
+              <div id="wechat-host-box" class="box rich_media_content"></div>
+            </div>
+          `;
+
+          const hostBox = document.getElementById('wechat-host-box')!;
+          const temp = document.createElement('div');
+          temp.innerHTML = html;
+          const morphDoc = temp.querySelector('.morph-doc');
+          if (morphDoc) {
+            while (morphDoc.firstChild) {
+              hostBox.appendChild(morphDoc.firstChild);
+            }
+          }
+
+          // Simulate WeChat ProseMirror stripping style from ol, ul, li
+          for (const listEl of Array.from(hostBox.querySelectorAll('ol, ul'))) {
+            listEl.removeAttribute('style');
+            listEl.classList.add('list-paddingleft-1');
+          }
+          for (const liEl of Array.from(hostBox.querySelectorAll('li'))) {
+            liEl.removeAttribute('style');
+          }
+
+          const collectAlignments = (selector: string) =>
+            Array.from(hostBox.querySelectorAll(selector)).map((el) => {
+              const htmlEl = el as HTMLElement;
+              return {
+                inlineTextAlign: htmlEl.style.textAlign,
+                computedTextAlign: window.getComputedStyle(htmlEl).textAlign,
+              };
+            });
+
+          const measureFirstLinePrefixWidth = (boxId: string) => {
+            const root = document.getElementById(boxId)!;
+            const sections = Array.from(root.querySelectorAll('li > section'));
+            const targetSec = sections.find((s) =>
+              (s.textContent || '').includes('第二类是')
+            ) as HTMLElement;
+            const walker = document.createTreeWalker(targetSec, NodeFilter.SHOW_TEXT);
+            let textNode: Text | null = null;
+            while (walker.nextNode()) {
+              const current = walker.currentNode as Text;
+              if ((current.nodeValue || '').includes('第二类是')) {
+                textNode = current;
+                break;
+              }
+            }
+            if (!textNode) return -1;
+            const idx = (textNode.nodeValue || '').indexOf('第二类是');
+            const range = document.createRange();
+            range.setStart(textNode, idx);
+            range.setEnd(textNode, idx + 4);
+            return range.getBoundingClientRect().width;
+          };
+
+          return {
+            paragraphs: collectAlignments('p.morph-p'),
+            listSections: collectAlignments('li > section'),
+            quotes: collectAlignments('p.morph-quote'),
+            callouts: collectAlignments('p.morph-callout'),
+            previewCharSpanWidth: measureFirstLinePrefixWidth('preview-box'),
+            hostCharSpanWidth: measureFirstLinePrefixWidth('wechat-host-box'),
+          };
+        }, snap.html);
+
+        expect(alignAudit.paragraphs.length).toBeGreaterThan(0);
+        for (const item of alignAudit.paragraphs) {
+          expect(item.inlineTextAlign).toBe('left');
+          expect(item.computedTextAlign).toBe('left');
+        }
+
+        expect(alignAudit.listSections.length).toBe(3);
+        for (const item of alignAudit.listSections) {
+          expect(item.inlineTextAlign).toBe('left');
+          expect(item.computedTextAlign).toBe('left');
+        }
+
+        expect(alignAudit.quotes.length).toBe(1);
+        for (const item of alignAudit.quotes) {
+          expect(item.inlineTextAlign).toBe('left');
+          expect(item.computedTextAlign).toBe('left');
+        }
+
+        expect(alignAudit.callouts.length).toBe(1);
+        for (const item of alignAudit.callouts) {
+          expect(item.inlineTextAlign).toBe('left');
+          expect(item.computedTextAlign).toBe('left');
+        }
+
+        expect(alignAudit.previewCharSpanWidth).toBeGreaterThan(30);
+        expect(
+          Math.abs(alignAudit.hostCharSpanWidth - alignAudit.previewCharSpanWidth)
+        ).toBeLessThan(0.5);
+      }
+    } finally {
+      assetStore.clear();
+    }
+  });
 });

@@ -114,8 +114,10 @@ export function defaultMeasureElementHeight(el: HTMLElement, availableWidth: num
   const tag = el.tagName.toLowerCase();
 
   if (tag === 'img' || tag === 'svg') {
-    const attrH = Number(el.getAttribute('height') || 0);
-    const attrW = Number(el.getAttribute('width') || 0);
+    const explicitH = parseLengthPx(el.style?.height);
+    const explicitW = parseLengthPx(el.style?.width);
+    const attrH = explicitH !== null && explicitH > 0 ? explicitH : Number(el.getAttribute('height') || 0);
+    const attrW = explicitW !== null && explicitW > 0 ? explicitW : Number(el.getAttribute('width') || 0);
     let h = attrH > 0 ? attrH : 180;
     if (attrW > availableWidth && attrW > 0 && attrH > 0) {
       h = Math.round(attrH * (availableWidth / attrW));
@@ -151,14 +153,45 @@ export function defaultMeasureElementHeight(el: HTMLElement, availableWidth: num
   }
 
   if (tag === 'li') {
-    const fontSize = resolveFontSizePx(el, 16);
-    const lineHeight = resolveLineHeightMultiplier(el, 1.7);
-    const text = (el.textContent || '').trim();
-    const units = countVisualUnits(text);
-    const effectiveWidth = Math.max(120, (availableWidth - 28) * 0.92);
-    const lines = Math.max(1, Math.ceil((units * fontSize) / effectiveWidth));
+    const fontSize = resolveFontSizePx(el, 15);
+    const lineHeight = resolveLineHeightMultiplier(el, 1.75);
+    const nestedLists = Array.from(el.children).filter((c) => {
+      const childTag = c.tagName.toLowerCase();
+      return childTag === 'ul' || childTag === 'ol';
+    }) as HTMLElement[];
+
+    let leadText = '';
+    for (let node = el.firstChild; node; node = node.nextSibling) {
+      if (node.nodeType === 1) {
+        const childTag = (node as Element).tagName.toLowerCase();
+        if (childTag === 'ul' || childTag === 'ol') continue;
+      }
+      leadText += node.textContent || '';
+    }
+    leadText = leadText.trim();
+
+    let leadCodeCount = 0;
+    for (const codeEl of Array.from(el.querySelectorAll('code'))) {
+      if (codeEl.closest('ul, ol') === el.parentElement) {
+        leadCodeCount++;
+      }
+    }
+
+    const effectiveWidth = Math.max(120, (availableWidth - 26) * 0.9);
+    let leadHeight = 0;
+    if (leadText.length > 0) {
+      const units = countVisualUnits(leadText) + leadCodeCount * 1.2;
+      const lines = Math.max(1, Math.ceil((units * fontSize) / effectiveWidth));
+      leadHeight = Math.ceil(lines * fontSize * lineHeight);
+    }
+
+    let nestedHeight = 0;
+    for (const nl of nestedLists) {
+      nestedHeight += defaultMeasureElementHeight(nl, Math.max(120, availableWidth - 26));
+    }
+
     const marginV = parseExplicitVerticalMargins(el, 8);
-    return Math.ceil(lines * fontSize * lineHeight) + marginV;
+    return Math.max(leadHeight + nestedHeight, nestedLists.length === 0 ? Math.ceil(fontSize * lineHeight) : 0) + marginV;
   }
 
   if (tag === 'ol' || tag === 'ul') {
@@ -339,6 +372,7 @@ function restoreOversizeElements(rootContainer: HTMLElement, skipPages: HTMLElem
     el.style.removeProperty('max-height');
     el.style.removeProperty('max-width');
     el.style.removeProperty('object-fit');
+    el.style.removeProperty('min-height');
     if (el.hasAttribute('data-morph-orig-height')) {
       const orig = el.getAttribute('data-morph-orig-height') || '';
       if (orig) {
@@ -348,7 +382,65 @@ function restoreOversizeElements(rootContainer: HTMLElement, skipPages: HTMLElem
       }
       el.removeAttribute('data-morph-orig-height');
     }
+    if (el.hasAttribute('data-morph-orig-width')) {
+      const origW = el.getAttribute('data-morph-orig-width') || '';
+      if (origW) {
+        el.style.width = origW;
+      } else {
+        el.style.removeProperty('width');
+      }
+      el.removeAttribute('data-morph-orig-width');
+    }
   });
+}
+
+function mergeNestedLiContinuations(listEl: HTMLElement): void {
+  const lis = Array.from(listEl.children).filter(
+    (c) => c.tagName.toLowerCase() === 'li',
+  ) as HTMLElement[];
+  for (const li of lis) {
+    if (!li.isConnected) continue;
+    if (li.getAttribute('data-morph-split-li-continuation') === 'true') {
+      const prevLi = li.previousElementSibling as HTMLElement | null;
+      if (prevLi && prevLi.tagName.toLowerCase() === 'li') {
+        const contNestedList = Array.from(li.children).find((c) => {
+          const t = c.tagName.toLowerCase();
+          return t === 'ul' || t === 'ol';
+        }) as HTMLElement | undefined;
+        const prevNestedList = Array.from(prevLi.children)
+          .reverse()
+          .find((c) => {
+            const t = c.tagName.toLowerCase();
+            return t === 'ul' || t === 'ol';
+          }) as HTMLElement | undefined;
+        if (
+          contNestedList &&
+          prevNestedList &&
+          contNestedList.tagName.toLowerCase() === prevNestedList.tagName.toLowerCase()
+        ) {
+          while (contNestedList.firstChild) {
+            prevNestedList.appendChild(contNestedList.firstChild);
+          }
+          contNestedList.remove();
+        }
+        while (li.firstChild) {
+          prevLi.appendChild(li.firstChild);
+        }
+        li.remove();
+        mergeNestedLiContinuations(prevLi);
+        continue;
+      } else {
+        li.removeAttribute('data-morph-split-li-continuation');
+        li.style.removeProperty('list-style-type');
+      }
+    }
+    Array.from(li.children).forEach((child) => {
+      const ct = child.tagName.toLowerCase();
+      if (ct === 'ul' || ct === 'ol') {
+        mergeNestedLiContinuations(child as HTMLElement);
+      }
+    });
+  }
 }
 
 function mergeAdjacentSplitContinuations(container: HTMLElement): void {
@@ -367,10 +459,14 @@ function mergeAdjacentSplitContinuations(container: HTMLElement): void {
           prev.appendChild(child.firstChild);
         }
         child.remove();
+        mergeNestedLiContinuations(prev);
         continue;
       } else {
         child.removeAttribute('data-morph-split-continuation');
+        mergeNestedLiContinuations(child);
       }
+    } else if (tag === 'ol' || tag === 'ul') {
+      mergeNestedLiContinuations(child);
     }
 
     if (tag === 'table' && child.getAttribute('data-morph-split-continuation') === 'true') {
@@ -404,6 +500,104 @@ function mergeAdjacentSplitContinuations(container: HTMLElement): void {
   });
 }
 
+function measureLiLeadHeight(li: HTMLElement, availableWidth: number): number {
+  const fontSize = resolveFontSizePx(li, 15);
+  const lineHeight = resolveLineHeightMultiplier(li, 1.75);
+  let leadText = '';
+  for (let node = li.firstChild; node; node = node.nextSibling) {
+    if (node.nodeType === 1) {
+      const childTag = (node as Element).tagName.toLowerCase();
+      if (childTag === 'ul' || childTag === 'ol') continue;
+    }
+    leadText += node.textContent || '';
+  }
+  leadText = leadText.trim();
+  const marginV = parseExplicitVerticalMargins(li, 8);
+  if (!leadText) return marginV;
+
+  let leadCodeCount = 0;
+  for (const codeEl of Array.from(li.querySelectorAll('code'))) {
+    if (codeEl.closest('ul, ol') === li.parentElement) {
+      leadCodeCount++;
+    }
+  }
+  const effectiveWidth = Math.max(120, (availableWidth - 26) * 0.9);
+  const units = countVisualUnits(leadText) + leadCodeCount * 1.2;
+  const lines = Math.max(1, Math.ceil((units * fontSize) / effectiveWidth));
+  return Math.ceil(lines * fontSize * lineHeight) + marginV;
+}
+
+function trySplitListItemWithNestedList(
+  li: HTMLElement,
+  budgetHeight: number,
+  allowForceFirstSubItem: boolean,
+  availableWidth: number,
+  measure: (node: HTMLElement, width: number) => number,
+): { usedHeight: number; tailLi: HTMLElement } | null {
+  const nestedList = Array.from(li.children).find((c) => {
+    const t = c.tagName.toLowerCase();
+    return t === 'ul' || t === 'ol';
+  }) as HTMLElement | undefined;
+  if (!nestedList) return null;
+
+  const subItems = Array.from(nestedList.children).filter(
+    (c) => c.tagName.toLowerCase() === 'li',
+  ) as HTMLElement[];
+  if (subItems.length < 2) return null;
+
+  const nestedWidth = Math.max(120, availableWidth - 26);
+  const leadH = measureLiLeadHeight(li, availableWidth);
+  const nestedOverhead = measureListOrTableOverhead(nestedList);
+  const subHeights = subItems.map((sub) => measure(sub, nestedWidth));
+
+  let subFitCount = 0;
+  let subAcc = leadH + nestedOverhead;
+  while (subFitCount < subItems.length && subAcc + subHeights[subFitCount] <= budgetHeight) {
+    subAcc += subHeights[subFitCount];
+    subFitCount++;
+  }
+
+  if (subFitCount === 0) {
+    if (!allowForceFirstSubItem) {
+      return null;
+    }
+    subFitCount = 1;
+    subAcc = Math.min(budgetHeight, leadH + nestedOverhead + subHeights[0]);
+  }
+
+  if (subFitCount >= subItems.length) {
+    return null;
+  }
+
+  const isNestedOl = nestedList.tagName.toLowerCase() === 'ol';
+  let nestedBaseStart = 1;
+  if (isNestedOl) {
+    if (!nestedList.hasAttribute('data-morph-original-start')) {
+      nestedList.setAttribute('data-morph-original-start', nestedList.getAttribute('start') ?? '');
+    }
+    nestedBaseStart = parseInt(nestedList.getAttribute('start') || '1', 10) || 1;
+    nestedList.setAttribute('start', String(nestedBaseStart));
+  }
+
+  const tailNestedList = nestedList.cloneNode(false) as HTMLElement;
+  tailNestedList.setAttribute('data-morph-split-continuation', 'true');
+  tailNestedList.removeAttribute('data-morph-original-start');
+  if (isNestedOl) {
+    tailNestedList.setAttribute('start', String(nestedBaseStart + subFitCount));
+  }
+
+  for (const movingSub of subItems.slice(subFitCount)) {
+    tailNestedList.appendChild(movingSub);
+  }
+
+  const tailLi = li.cloneNode(false) as HTMLElement;
+  tailLi.setAttribute('data-morph-split-li-continuation', 'true');
+  tailLi.style.listStyleType = 'none';
+  tailLi.appendChild(tailNestedList);
+
+  return { usedHeight: subAcc, tailLi };
+}
+
 function measureFirstUnitHeight(
   el: HTMLElement,
   availableWidth: number,
@@ -415,6 +609,23 @@ function measureFirstUnitHeight(
       (c) => c.tagName.toLowerCase() === 'li',
     ) as HTMLElement | undefined;
     if (firstLi) {
+      const nestedList = Array.from(firstLi.children).find((c) => {
+        const t = c.tagName.toLowerCase();
+        return t === 'ul' || t === 'ol';
+      }) as HTMLElement | undefined;
+      if (nestedList) {
+        const firstSubLi = Array.from(nestedList.children).find(
+          (c) => c.tagName.toLowerCase() === 'li',
+        ) as HTMLElement | undefined;
+        if (firstSubLi) {
+          return (
+            measureListOrTableOverhead(el) +
+            measureLiLeadHeight(firstLi, availableWidth) +
+            measureListOrTableOverhead(nestedList) +
+            measure(firstSubLi, Math.max(120, availableWidth - 26))
+          );
+        }
+      }
       return measureListOrTableOverhead(el) + measure(firstLi, availableWidth);
     }
   }
@@ -445,10 +656,23 @@ function applyOversizeScaling(
   if (!target.hasAttribute('data-morph-orig-height')) {
     target.setAttribute('data-morph-orig-height', target.style.height || '');
   }
+  if (!target.hasAttribute('data-morph-orig-width')) {
+    target.setAttribute('data-morph-orig-width', target.style.width || '');
+  }
   target.setAttribute('data-morph-oversize', 'scaled');
   target.style.maxHeight = '100%';
   target.style.maxWidth = '100%';
   target.style.objectFit = 'contain';
+  if (target !== block) {
+    if (!block.hasAttribute('data-morph-orig-height')) {
+      block.setAttribute('data-morph-orig-height', block.style.height || '');
+    }
+    block.setAttribute('data-morph-oversize', 'scaled-wrapper');
+    block.style.maxHeight = `${Math.max(40, Math.floor(availableContentHeight - 8))}px`;
+    block.style.minHeight = '0px';
+    target.style.height = `${Math.max(40, Math.floor(availableContentHeight - 16))}px`;
+    target.style.width = 'auto';
+  }
 
   if (!oversizePageNumbers.includes(pageNumber)) {
     oversizePageNumbers.push(pageNumber);
@@ -465,26 +689,13 @@ function applyOversizeScaling(
   });
 }
 
-function formatFooterText(
-  pageNumber: number,
-  totalPages: number,
-  footerFormat?: CardsPaginationOptions['footerFormat'],
-): string {
-  if (typeof footerFormat === 'function') {
-    return footerFormat(pageNumber, totalPages);
-  }
-  const p = String(pageNumber).padStart(2, '0');
-  const t = String(totalPages).padStart(2, '0');
-  return `${p} / ${t}`;
-}
-
 function buildCardSectionElement(
   doc: Document,
   blocks: HTMLElement[],
   pageNumber: number,
   totalPages: number,
   geometry: CardViewportGeometry,
-  options: CardsPaginationOptions,
+  _options: CardsPaginationOptions,
 ): HTMLElement {
   const section = doc.createElement('section');
   section.className = 'morph-card-page';
@@ -505,54 +716,9 @@ function buildCardSectionElement(
     ].join('; ') + ';',
   );
 
-  const header = doc.createElement('header');
-  header.className = 'morph-card-header';
-  header.setAttribute('data-morph-generated', 'header');
-  header.setAttribute(
-    'style',
-    [
-      `height: ${geometry.headerHeight}px`,
-      `min-height: ${geometry.headerHeight}px`,
-      `max-height: ${geometry.headerHeight}px`,
-      'box-sizing: border-box',
-      'display: flex',
-      'align-items: center',
-      'justify-content: space-between',
-      'flex-shrink: 0',
-      'font-size: 12px',
-      'line-height: 1',
-      'opacity: 0.65',
-    ].join('; ') + ';',
-  );
-  header.textContent = options.headerText ?? 'MorphMD';
-  section.appendChild(header);
-
   for (const block of blocks) {
     section.appendChild(block);
   }
-
-  const footer = doc.createElement('footer');
-  footer.className = 'morph-card-footer';
-  footer.setAttribute('data-morph-generated', 'footer');
-  footer.setAttribute(
-    'style',
-    [
-      `height: ${geometry.footerHeight}px`,
-      `min-height: ${geometry.footerHeight}px`,
-      `max-height: ${geometry.footerHeight}px`,
-      'margin-top: auto',
-      'box-sizing: border-box',
-      'display: flex',
-      'align-items: center',
-      'justify-content: flex-end',
-      'flex-shrink: 0',
-      'font-size: 12px',
-      'line-height: 1',
-      'opacity: 0.65',
-    ].join('; ') + ';',
-  );
-  footer.textContent = formatFooterText(pageNumber, totalPages, options.footerFormat);
-  section.appendChild(footer);
 
   return section;
 }
@@ -562,21 +728,12 @@ function updateCardChromeAttributes(
   pageNumber: number,
   totalPages: number,
   geometry: CardViewportGeometry,
-  options: CardsPaginationOptions,
+  _options: CardsPaginationOptions,
 ): void {
   pageEl.setAttribute('data-page', String(pageNumber));
   pageEl.setAttribute('data-total-pages', String(totalPages));
   pageEl.setAttribute('data-ratio', geometry.ratio);
-
-  const header = pageEl.querySelector<HTMLElement>('[data-morph-generated="header"]');
-  if (header && options.headerText !== undefined) {
-    header.textContent = options.headerText;
-  }
-
-  const footer = pageEl.querySelector<HTMLElement>('[data-morph-generated="footer"]');
-  if (footer) {
-    footer.textContent = formatFooterText(pageNumber, totalPages, options.footerFormat);
-  }
+  pageEl.querySelectorAll('[data-morph-generated="header"], [data-morph-generated="footer"], .morph-card-header, .morph-card-footer').forEach((el) => el.remove());
 }
 
 interface InternalReflowContext {
@@ -750,12 +907,34 @@ function executePagination(
         continue;
       }
 
-      if (items.length > 1) {
+      if (items.length >= 1) {
         let acc = overhead;
         let fitCount = 0;
         while (fitCount < items.length && acc + itemHeights[fitCount] <= remainingHeight) {
           acc += itemHeights[fitCount];
           fitCount++;
+        }
+
+        let splitTailLi: HTMLElement | null = null;
+        let splitHeadLiUsed = 0;
+
+        if (fitCount < items.length) {
+          const boundaryLi = items[fitCount];
+          const remainingForLi = remainingHeight - acc;
+          const isPageCompletelyEmpty = currentBlocks.length === 0 && fitCount === 0;
+          const nestedSplit = trySplitListItemWithNestedList(
+            boundaryLi,
+            remainingForLi,
+            isPageCompletelyEmpty,
+            availableWidth,
+            measure,
+          );
+          if (nestedSplit) {
+            splitTailLi = nestedSplit.tailLi;
+            splitHeadLiUsed = nestedSplit.usedHeight;
+            acc += splitHeadLiUsed;
+            fitCount++;
+          }
         }
 
         if (fitCount === 0 && currentBlocks.length > 0) {
@@ -765,12 +944,16 @@ function executePagination(
         }
 
         if (fitCount === 0) {
-          // Single list item exceeds full empty page height: force 1 item to prevent infinite loop
-          fitCount = 1;
-          acc = Math.min(availableHeight, overhead + itemHeights[0]);
+          // Single list item exceeds full empty page height and has no splittable nested list
+          if (items.length === 1) {
+            // Let step 4 handle oversize atomic scaling if needed
+          } else {
+            fitCount = 1;
+            acc = Math.min(availableHeight, overhead + itemHeights[0]);
+          }
         }
 
-        if (fitCount < items.length) {
+        if (fitCount > 0 && (fitCount < items.length || splitTailLi !== null)) {
           const isOl = tag === 'ol';
           let baseStart = 1;
           if (isOl) {
@@ -786,8 +969,13 @@ function executePagination(
           tailList.removeAttribute('data-morph-original-start');
 
           if (isOl) {
-            const nextStart = baseStart + fitCount;
+            const consumedFullItems = splitTailLi ? fitCount - 1 : fitCount;
+            const nextStart = baseStart + consumedFullItems;
             tailList.setAttribute('start', String(nextStart));
+          }
+
+          if (splitTailLi) {
+            tailList.appendChild(splitTailLi);
           }
 
           const movingItems = items.slice(fitCount);
@@ -801,8 +989,10 @@ function executePagination(
           continue;
         }
 
-        pushBlockToCurrentPage(block, acc, queue);
-        continue;
+        if (fitCount > 0) {
+          pushBlockToCurrentPage(block, acc, queue);
+          continue;
+        }
       }
     }
 

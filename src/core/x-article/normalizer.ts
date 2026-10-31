@@ -230,16 +230,19 @@ function renderTableToCanvasDataUrl(
   });
 
   const totalH = wrappedRows.reduce((sum, r) => sum + r.rowH, 0) + 2;
+  const minCanvasH = 176;
+  const canvasH = Math.max(totalH, minCanvasH);
+  const tableOffsetY = Math.floor((canvasH - totalH) / 2);
   const dpr = 2;
   canvas.width = w * dpr;
-  canvas.height = totalH * dpr;
+  canvas.height = canvasH * dpr;
   ctx.scale(dpr, dpr);
 
   // Draw table background & borders
   ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, w, totalH);
+  ctx.fillRect(0, 0, w, canvasH);
 
-  let curY = 1;
+  let curY = tableOffsetY + 1;
   for (let rIdx = 0; rIdx < wrappedRows.length; rIdx++) {
     const row = wrappedRows[rIdx];
     if (row.isHeaderRow) {
@@ -301,7 +304,7 @@ function renderTableToCanvasDataUrl(
   // Outer table frame
   ctx.strokeStyle = '#D8D4CB';
   ctx.lineWidth = 1;
-  ctx.strokeRect(0.5, 0.5, w - 1, totalH - 1);
+  ctx.strokeRect(0.5, tableOffsetY + 0.5, w - 1, totalH - 1);
 
   stampCanvasHashSignature(ctx, hashContent32(table.textContent || 'table'));
 
@@ -396,15 +399,20 @@ function renderMathToCanvasDataUrl(
 
     const exW = parseFloat(String(attrs.width || '').replace('ex', '')) || vbW / 440;
     const exH = parseFloat(String(attrs.height || '').replace('ex', '')) || vbH / 440;
-    const pxPerEx = isDisplay ? 8.5 : 7.8;
+    const pxPerEx = isDisplay ? 8.2 : 7.8;
 
-    const drawW = Math.max(12, Math.round(exW * pxPerEx));
-    const drawH = Math.max(12, Math.round(exH * pxPerEx));
-    const padX = isDisplay ? 18 : 2;
-    const padY = isDisplay ? 12 : 2;
+    const rawDrawW = Math.max(12, Math.round(exW * pxPerEx));
+    const rawDrawH = Math.max(12, Math.round(exH * pxPerEx));
+    const padX = isDisplay ? 32 : 2;
+    const padY = isDisplay ? 24 : 2;
 
-    const cssWidth = isDisplay ? Math.min(680, Math.max(drawW + padX * 2, 160)) : drawW + padX * 2;
-    const cssHeight = drawH + padY * 2;
+    const maxDisplayDrawW = 680 - padX * 2;
+    const fitScale = isDisplay && rawDrawW > maxDisplayDrawW ? maxDisplayDrawW / rawDrawW : 1;
+    const drawW = Math.max(12, Math.round(rawDrawW * fitScale));
+    const drawH = Math.max(12, Math.round(rawDrawH * fitScale));
+
+    const cssWidth = isDisplay ? 680 : drawW + padX * 2;
+    const cssHeight = isDisplay ? Math.max(drawH + padY * 2, 176) : drawH + padY * 2;
 
     // Ensure physical PNG width >= 72 so inspectRasterDataUrl always finds interior content pixels at x >= 24
     const dpr = Math.max(2, Math.ceil(72 / Math.max(1, cssWidth)));
@@ -415,9 +423,18 @@ function renderMathToCanvasDataUrl(
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, cssWidth, cssHeight);
 
+    if (isDisplay) {
+      ctx.fillStyle = '#FAF9F6';
+      ctx.fillRect(16, 12, cssWidth - 32, cssHeight - 24);
+      ctx.strokeStyle = '#EAE7E0';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(16.5, 12.5, cssWidth - 33, cssHeight - 25);
+    }
+
     const offsetX = isDisplay ? Math.max(padX, (cssWidth - drawW) / 2) : padX;
+    const offsetY = isDisplay ? Math.max(padY, (cssHeight - drawH) / 2) : padY;
     ctx.save();
-    ctx.translate(offsetX, padY);
+    ctx.translate(offsetX, offsetY);
     ctx.scale(drawW / vbW, drawH / vbH);
     ctx.translate(-minX, -minY);
     ctx.fillStyle = '#141413';
@@ -974,10 +991,17 @@ export function normalizeXArticleStructureAndStyles(
         mathEl.querySelector('annotation')?.textContent ||
         mathEl.querySelector('.katex-mathml')?.textContent ||
         (mathEl.textContent || '').trim();
+      const parentEl = mathEl.parentElement;
+      const isStandaloneMathInP =
+        parentEl?.tagName.toLowerCase() === 'p' &&
+        Array.from(parentEl.childNodes).every(
+          (n) => n === mathEl || (n.nodeType === 3 && (n.textContent || '').trim().length === 0)
+        );
       const isDisplay =
         mathEl.classList.contains('morph-math-display') ||
         mathEl.tagName.toLowerCase() === 'div' ||
-        Boolean(mathEl.querySelector('.katex-display'));
+        Boolean(mathEl.querySelector('.katex-display')) ||
+        isStandaloneMathInP;
 
       const canvasMath = renderMathToCanvasDataUrl(tex || 'math', isDisplay, doc);
       const dataUrl = canvasMath
@@ -1337,6 +1361,109 @@ export function normalizeXArticleStructureAndStyles(
       }
       deepList.remove();
     }
+  }
+
+  // Flatten nested unordered lists (<ul> inside <li>) into their parent <li> using <br> + "- "
+  // so Draft.js convertFromHTMLToContentBlocks preserves every sub-item on its own line with "- "
+  // without gluing the first sub-item onto the parent line or emitting trailing blank lines.
+  const nestedUls = Array.from(rootContainer.querySelectorAll('li ul')).reverse();
+  for (const nestedUl of nestedUls) {
+    if (!rootContainer.contains(nestedUl)) continue;
+    const parentContainer = nestedUl.parentNode;
+    if (!parentContainer) continue;
+
+    // Remove whitespace-only text nodes immediately preceding nestedUl
+    while (
+      nestedUl.previousSibling &&
+      nestedUl.previousSibling.nodeType === 3 &&
+      (nestedUl.previousSibling.textContent || '').trim().length === 0
+    ) {
+      parentContainer.removeChild(nestedUl.previousSibling);
+    }
+    if (nestedUl.previousSibling && nestedUl.previousSibling.nodeType === 3) {
+      nestedUl.previousSibling.nodeValue = (nestedUl.previousSibling.nodeValue || '').replace(
+        /[\r\n\s]+$/,
+        ''
+      );
+    } else if (
+      nestedUl.previousSibling &&
+      nestedUl.previousSibling.nodeType === 1 &&
+      /^(p|div|section)$/i.test((nestedUl.previousSibling as Element).tagName)
+    ) {
+      unwrapElement(nestedUl.previousSibling as Element);
+    }
+
+    const childLis = Array.from(nestedUl.children).filter(
+      (c) => c.tagName.toLowerCase() === 'li'
+    );
+
+    for (const childLi of childLis) {
+      // Unwrap any inner <p>, <div>, or <section> wrappers inside childLi
+      for (const wrapper of Array.from(childLi.querySelectorAll('p, div, section'))) {
+        if (!childLi.contains(wrapper)) continue;
+        if (
+          wrapper.previousSibling &&
+          (wrapper.previousSibling.textContent || '').trim().length > 0
+        ) {
+          wrapper.parentNode?.insertBefore(doc.createElement('br'), wrapper);
+        }
+        unwrapElement(wrapper);
+      }
+
+      // Trim leading whitespace-only text nodes inside childLi
+      while (
+        childLi.firstChild &&
+        childLi.firstChild.nodeType === 3 &&
+        (childLi.firstChild.textContent || '').trim().length === 0
+      ) {
+        childLi.removeChild(childLi.firstChild);
+      }
+      // Trim trailing whitespace-only text nodes inside childLi
+      while (
+        childLi.lastChild &&
+        childLi.lastChild.nodeType === 3 &&
+        (childLi.lastChild.textContent || '').trim().length === 0
+      ) {
+        childLi.removeChild(childLi.lastChild);
+      }
+
+      const hasContent =
+        (childLi.textContent || '').trim().length > 0 ||
+        Boolean(childLi.querySelector('img, hr'));
+      if (!hasContent) continue;
+
+      const existingLeadText = (childLi.textContent || '').trimStart();
+      if (!/^-\s/.test(existingLeadText)) {
+        if (childLi.firstChild && childLi.firstChild.nodeType === 3) {
+          childLi.firstChild.nodeValue = `- ${(childLi.firstChild.nodeValue || '').replace(/^\s+/, '')}`;
+        } else {
+          childLi.insertBefore(doc.createTextNode('- '), childLi.firstChild);
+        }
+      }
+
+      const prev = nestedUl.previousSibling;
+      const hasPrecedingContent =
+        prev !== null &&
+        !(prev.nodeType === 1 && (prev as Element).tagName.toLowerCase() === 'br');
+      if (hasPrecedingContent) {
+        parentContainer.insertBefore(doc.createElement('br'), nestedUl);
+      }
+
+      while (childLi.firstChild) {
+        parentContainer.insertBefore(childLi.firstChild, nestedUl);
+      }
+    }
+
+    // Remove whitespace-only text nodes immediately following nestedUl if nestedUl is at the end
+    while (
+      nestedUl.nextSibling &&
+      nestedUl.nextSibling.nodeType === 3 &&
+      (nestedUl.nextSibling.textContent || '').trim().length === 0
+    ) {
+      parentContainer.removeChild(nestedUl.nextSibling);
+    }
+
+    nestedUl.remove();
   }
 
   // 9. #3.1 Strip inline styles on all elements unless allowInlineStyles is enabled

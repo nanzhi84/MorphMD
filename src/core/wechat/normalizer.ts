@@ -711,6 +711,13 @@ export function normalizeWeChatStructureAndStyles(
       if (ls && canSetProp('letter-spacing') && !sec.style.getPropertyValue('letter-spacing')) {
         sec.style.setProperty('letter-spacing', ls);
       }
+      if (canSetProp('text-align') && !sec.style.getPropertyValue('text-align')) {
+        const ta =
+          li.style.getPropertyValue('text-align') ||
+          parentListStyle?.getPropertyValue('text-align') ||
+          'left';
+        sec.style.setProperty('text-align', ta);
+      }
       if (canSetProp('margin-top') && !sec.style.getPropertyValue('margin-top')) {
         sec.style.setProperty('margin-top', '0px');
       }
@@ -745,6 +752,9 @@ export function normalizeWeChatStructureAndStyles(
     }
     if (color && canSetProp('color') && !p.style.getPropertyValue('color')) {
       p.style.setProperty('color', color);
+    }
+    if (canSetProp('text-align') && !p.style.getPropertyValue('text-align')) {
+      p.style.setProperty('text-align', 'left');
     }
   });
 
@@ -808,6 +818,9 @@ export function normalizeWeChatStructureAndStyles(
       '#1f1e1d';
     if (calloutColor && canSetProp('color') && !targetCallout.style.getPropertyValue('color')) {
       targetCallout.style.setProperty('color', calloutColor);
+    }
+    if (canSetProp('text-align') && !targetCallout.style.getPropertyValue('text-align')) {
+      targetCallout.style.setProperty('text-align', 'left');
     }
 
     targetCallout.querySelectorAll<HTMLElement>('.morph-callout-title').forEach((titleEl) => {
@@ -1019,6 +1032,9 @@ export function normalizeWeChatStructureAndStyles(
     }
     if (quoteFontStyle && canSetProp('font-style') && !bq.style.getPropertyValue('font-style')) {
       bq.style.setProperty('font-style', quoteFontStyle);
+    }
+    if (canSetProp('text-align') && !bq.style.getPropertyValue('text-align')) {
+      bq.style.setProperty('text-align', 'left');
     }
 
     for (const child of Array.from(bq.childNodes)) {

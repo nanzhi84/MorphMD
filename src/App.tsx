@@ -174,7 +174,7 @@ export const App: React.FC<AppProps> = ({
   assetStore: externalAssetStore,
   debounceMs = 60,
   onCopyPayload,
-  onExportPackage,
+  onExportPackage: _onExportPackage,
   onExportCardsZip,
 }) => {
   // 1. Initialize AssetStore & EditorSessionController
@@ -270,7 +270,16 @@ export const App: React.FC<AppProps> = ({
     initialTargetId === 'cards' ? '3:4' : initialTargetId === 'x-article' ? '680px' : '720px'
   );
   const [deviceMode, setDeviceMode] = useState<'desktop' | 'mobile'>('desktop');
-  const [zoomPercent, setZoomPercent] = useState<string>('100%');
+  const [zoomScale, setZoomScale] = useState<number>(1);
+  const [userscriptReady, setUserscriptReady] = useState<boolean>(() =>
+    typeof window !== 'undefined' &&
+    Boolean(
+      (window as unknown as { __MORPHMD_USERSCRIPT_READY__?: boolean })
+        .__MORPHMD_USERSCRIPT_READY__ ||
+        (typeof document !== 'undefined' &&
+          document.documentElement?.getAttribute('data-morphmd-userscript') === 'ready')
+    )
+  );
   const [previewMode, setPreviewMode] = useState<'render' | 'sourcemap'>('render');
   const [diagnosticsOpen, setDiagnosticsOpen] = useState<boolean>(false);
   const [diagFilter, setDiagFilter] = useState<DiagnosticFilter>('all');
@@ -280,11 +289,12 @@ export const App: React.FC<AppProps> = ({
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [assetTick, setAssetTick] = useState<number>(0);
   const [editorWidth, setEditorWidth] = useState<number>(360);
-  const [drawerWidth, setDrawerWidth] = useState<number>(300);
+  const [drawerWidth, setDrawerWidth] = useState<number>(396);
   const [cssGuideOpen, setCssGuideOpen] = useState<boolean>(false);
 
   const appRootRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const previewScrollRef = useRef<HTMLDivElement | null>(null);
   const previewStageRef = useRef<HTMLDivElement | null>(null);
   const cssGuideDialogRef = useRef<HTMLDialogElement | null>(null);
   const snapshotRef = useRef<DeliverySnapshot>(snapshot);
@@ -393,6 +403,46 @@ export const App: React.FC<AppProps> = ({
     };
   }, [store]);
 
+  // Userscript handshake listener for Status Dot pill
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncUserscriptReady = () => {
+      const ready = Boolean(
+        (window as unknown as { __MORPHMD_USERSCRIPT_READY__?: boolean })
+          .__MORPHMD_USERSCRIPT_READY__ ||
+          (typeof document !== 'undefined' &&
+            document.documentElement?.getAttribute('data-morphmd-userscript') === 'ready')
+      );
+      setUserscriptReady(ready);
+    };
+    syncUserscriptReady();
+    window.addEventListener('morphmd:userscript-ready', syncUserscriptReady);
+    return () => {
+      window.removeEventListener('morphmd:userscript-ready', syncUserscriptReady);
+    };
+  }, []);
+
+  // Mac trackpad pinch-to-zoom listener on preview scroll container
+  useEffect(() => {
+    const scrollEl = previewScrollRef.current;
+    if (!scrollEl) return;
+
+    const handlePreviewWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const delta = event.deltaY;
+      setZoomScale((prev) => {
+        const next = Number((prev - delta * 0.008).toFixed(3));
+        return Math.min(2.5, Math.max(0.5, next));
+      });
+    };
+
+    scrollEl.addEventListener('wheel', handlePreviewWheel, { passive: false });
+    return () => {
+      scrollEl.removeEventListener('wheel', handlePreviewWheel);
+    };
+  }, []);
+
   // 3. Target View & Canvas Ratio Handlers
   const handleSwitchTarget = useCallback(
     async (nextTarget: TargetId) => {
@@ -416,7 +466,6 @@ export const App: React.FC<AppProps> = ({
         tokens: nextTarget !== 'x-article' || hasCustomizedTokens ? tokens : undefined,
         cardsOptions: {
           ratio: cardRatio,
-          headerText: tuningRef.current.cardHeaderText,
         },
       });
       const snap = await session.setTarget(nextTarget);
@@ -509,6 +558,12 @@ export const App: React.FC<AppProps> = ({
       if (candidateFiles.length === 0) return;
       e.preventDefault();
 
+      const textarea = e.currentTarget || textareaRef.current;
+      const rawSelStart =
+        textarea && typeof textarea.selectionStart === 'number' ? textarea.selectionStart : null;
+      const rawSelEnd =
+        textarea && typeof textarea.selectionEnd === 'number' ? textarea.selectionEnd : null;
+
       const insertedLinks: string[] = [];
       for (const file of candidateFiles) {
         const bytes = await readFileAsUint8Array(file);
@@ -516,40 +571,54 @@ export const App: React.FC<AppProps> = ({
           fileName: file.name || 'clipboard-image.png',
           mimeType: file.type || 'image/png',
         });
-        const altLabel = (file.name || '粘贴图片').replace(/\.[^.]+$/, '');
-        insertedLinks.push(`![${altLabel}](${rec.uri})`);
+        insertedLinks.push(`![](${rec.uri})`);
       }
 
       setAssetTick((t) => t + 1);
-      const currentMd = session.getDraftMarkdown() || markdown;
-      const sep = currentMd.endsWith('\n') || currentMd.length === 0 ? '' : '\n\n';
-      const nextMd = `${currentMd}${sep}${insertedLinks.join('\n\n')}\n`;
+      const currentMd = session.getDraftMarkdown() ?? markdownRef.current ?? markdown;
+      const rawStart = rawSelStart ?? currentMd.length;
+      const rawEnd = rawSelEnd ?? rawStart;
+      const selStart = Math.max(0, Math.min(rawStart, currentMd.length));
+      const selEnd = Math.max(selStart, Math.min(rawEnd, currentMd.length));
+      const before = currentMd.slice(0, selStart);
+      const after = currentMd.slice(selEnd);
+      const insertedBlock = insertedLinks.join('\n\n');
+      const prefixSep =
+        before.length === 0
+          ? ''
+          : before.endsWith('\n\n')
+            ? ''
+            : before.endsWith('\n')
+              ? '\n'
+              : '\n\n';
+      const suffixSep =
+        after.length === 0
+          ? '\n'
+          : after.startsWith('\n\n')
+            ? ''
+            : after.startsWith('\n')
+              ? '\n'
+              : '\n\n';
+      const nextMd = `${before}${prefixSep}${insertedBlock}${suffixSep}${after}`;
+      const nextCursorPos =
+        before.length + prefixSep.length + insertedBlock.length + suffixSep.length;
+
+      markdownRef.current = nextMd;
       setMarkdown(nextMd);
+      if (textarea) {
+        try {
+          textarea.selectionStart = nextCursorPos;
+          textarea.selectionEnd = nextCursorPos;
+        } catch {
+          // ignore selection assignment errors on detached nodes
+        }
+        updateCursorMetrics(textarea);
+      }
       const snap = await session.commitDoc(nextMd);
       setSnapshot(snap);
     },
-    [markdown, session, store]
+    [markdown, session, store, updateCursorMetrics]
   );
-
-  const handleUndo = useCallback(async () => {
-    await session.flush();
-    const snap = await session.undo();
-    const restoredMd = session.getDraftMarkdown();
-    setMarkdown(restoredMd);
-    if (snap) {
-      setSnapshot(snap);
-    }
-  }, [session]);
-
-  const handleRedo = useCallback(async () => {
-    await session.flush();
-    const snap = await session.redo();
-    const restoredMd = session.getDraftMarkdown();
-    setMarkdown(restoredMd);
-    if (snap) {
-      setSnapshot(snap);
-    }
-  }, [session]);
 
   // 5. Style Settings Drawer Handlers
   const applyCustomCssValue = useCallback(
@@ -933,14 +1002,6 @@ export const App: React.FC<AppProps> = ({
     setTimeout(() => setCopyFeedback(false), 1800);
   }, [cardRatio, onCopyPayload, onExportCardsZip, session, snapshot, store, targetId]);
 
-  const handleExportPackage = useCallback(async () => {
-    await session.flush();
-    const committedMd = session.getCommittedMarkdown() || markdown;
-    const manifest = store.exportPackageManifest(committedMd);
-    onExportPackage?.(manifest);
-    triggerBrowserDownload('article.md', manifest.rewrittenContent, 'text/markdown;charset=utf-8');
-  }, [markdown, onExportPackage, session, store]);
-
   // 7. Diagnostics & Status Calculations
   const diagnostics = snapshot.diagnostics ?? [];
   const warningDiagnostics = useMemo(
@@ -1008,10 +1069,8 @@ export const App: React.FC<AppProps> = ({
   }, [deviceMode, targetId]);
 
   const stageZoomScale = useMemo(() => {
-    const num = parseFloat(zoomPercent);
-    const baseZoom = Number.isNaN(num) ? 1 : num / 100;
-    return targetId === 'cards' ? Number((baseZoom * 0.68).toFixed(3)) : baseZoom;
-  }, [targetId, zoomPercent]);
+    return targetId === 'cards' ? Number((zoomScale * 0.68).toFixed(3)) : zoomScale;
+  }, [targetId, zoomScale]);
 
   return (
     <div ref={appRootRef} className="morph-app">
@@ -1086,48 +1145,28 @@ export const App: React.FC<AppProps> = ({
         </nav>
 
         <div className="morph-header-actions">
-          <select
-            className="morph-select"
-            aria-label="缩放比例"
-            data-testid="zoom-select"
-            value={zoomPercent}
-            onChange={(e) => setZoomPercent(e.target.value)}
+          <a
+            href="morphmd-x-paste.user.js"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`morph-userscript-pill ${userscriptReady ? 'is-ready' : 'is-uninstalled'}`}
+            data-testid="x-userscript-pill"
+            data-status={userscriptReady ? 'ready' : 'uninstalled'}
+            title={
+              userscriptReady
+                ? 'X 自动贴图油猴脚本已就绪（点击可查看或更新脚本）'
+                : '点击一键导入油猴脚本，在 X Articles 粘贴时自动走图片上传接口'
+            }
           >
-            <option value="75%">75%</option>
-            <option value="100%">100%</option>
-            <option value="125%">125%</option>
-            <option value="150%">150%</option>
-          </select>
-
-          <button
-            type="button"
-            className="morph-btn-secondary morph-btn-icon"
-            data-testid="undo-btn"
-            aria-label="撤销"
-            title="撤销 (Undo)"
-            onClick={() => void handleUndo()}
-          >
-            ↶
-          </button>
-          <button
-            type="button"
-            className="morph-btn-secondary morph-btn-icon"
-            data-testid="redo-btn"
-            aria-label="重做"
-            title="重做 (Redo)"
-            onClick={() => void handleRedo()}
-          >
-            ↷
-          </button>
-
-          <button
-            type="button"
-            className="morph-btn-secondary"
-            data-testid="export-package-btn"
-            onClick={() => void handleExportPackage()}
-          >
-            导出 .md + assets
-          </button>
+            <span
+              className="morph-userscript-dot"
+              data-testid="x-userscript-dot"
+              aria-hidden="true"
+            />
+            <span className="morph-userscript-label" data-testid="x-userscript-label">
+              {userscriptReady ? 'X 贴图脚本已就绪' : '安装 X 贴图脚本'}
+            </span>
+          </a>
 
           <button
             type="button"
@@ -1309,13 +1348,18 @@ export const App: React.FC<AppProps> = ({
             </div>
           </div>
 
-          <div className="morph-preview-scroll">
+          <div
+            ref={previewScrollRef}
+            className="morph-preview-scroll"
+            data-testid="preview-scroll"
+          >
             <div
               ref={previewStageRef}
               className={`morph-preview-stage ${previewMode === 'sourcemap' ? 'show-sourcemap' : ''}`}
               data-testid="preview-stage"
               data-target-view={targetId}
               data-card-ratio={cardRatio}
+              data-zoom-scale={String(zoomScale)}
               style={
                 {
                   '--stage-max-width': stageMaxWidth,

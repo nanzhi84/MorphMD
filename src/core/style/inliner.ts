@@ -115,6 +115,7 @@ ${tokenCssLines}
       font-size: var(--morph-body-size);
       line-height: var(--morph-line-height);
       color: var(--morph-ink);
+      text-align: left;
       margin-top: 0px;
       margin-bottom: var(--morph-block-gap);
     }
@@ -136,6 +137,7 @@ ${tokenCssLines}
       font-size: var(--morph-body-size);
       line-height: var(--morph-line-height);
       color: var(--morph-ink);
+      text-align: left;
       margin-top: 0px;
       margin-bottom: 16px;
       padding-left: 22px;
@@ -145,11 +147,13 @@ ${tokenCssLines}
       font-size: var(--morph-body-size);
       line-height: var(--morph-line-height);
       color: var(--morph-ink);
+      text-align: left;
       margin-top: 0px;
       margin-bottom: 6px;
       padding-left: 4px;
     }
     .morph-quote {
+      text-align: left;
       margin-top: 0px;
       margin-right: 0px;
       margin-bottom: 20px;
@@ -157,6 +161,7 @@ ${tokenCssLines}
     }
     .morph-quote .morph-p,
     .morph-quote p {
+      text-align: left;
       margin-top: 0px;
       margin-bottom: 0px;
     }
@@ -174,6 +179,21 @@ ${tokenCssLines}
     }
     .morph-p > .morph-img {
       margin-bottom: 0px;
+    }
+    .morph-p.morph-figure-media,
+    .morph-figure-media {
+      margin-top: 0px;
+      margin-bottom: 6px;
+    }
+    .morph-caption,
+    figcaption {
+      font-family: var(--morph-font-sans);
+      font-size: 13px;
+      line-height: 1.5;
+      color: #787774;
+      text-align: left;
+      margin-top: 0px;
+      margin-bottom: 16px;
     }
     .morph-math-display {
       display: block;
@@ -193,6 +213,7 @@ ${tokenCssLines}
       font-size: 14.5px;
       line-height: 1.65;
       color: var(--morph-ink);
+      text-align: left;
     }
     .morph-callout-title {
       font-family: var(--morph-font-sans);

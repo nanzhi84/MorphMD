@@ -33,6 +33,8 @@ describe('TestCardRatioPresetsAndViewportGeometry', () => {
         layoutWidth: 720,
         layoutHeight: 960,
         exportScale: 2,
+        headerHeight: 0,
+        footerHeight: 0,
       }),
     );
     expect(CARD_RATIO_PRESETS['4:5']).toEqual(
@@ -43,6 +45,8 @@ describe('TestCardRatioPresetsAndViewportGeometry', () => {
         layoutWidth: 720,
         layoutHeight: 900,
         exportScale: 2,
+        headerHeight: 0,
+        footerHeight: 0,
       }),
     );
     expect(CARD_RATIO_PRESETS['1:1']).toEqual(
@@ -53,6 +57,8 @@ describe('TestCardRatioPresetsAndViewportGeometry', () => {
         layoutWidth: 720,
         layoutHeight: 720,
         exportScale: 2,
+        headerHeight: 0,
+        footerHeight: 0,
       }),
     );
     expect(CARD_RATIO_PRESETS['16:9']).toEqual(
@@ -63,6 +69,8 @@ describe('TestCardRatioPresetsAndViewportGeometry', () => {
         layoutWidth: 960,
         layoutHeight: 540,
         exportScale: 2,
+        headerHeight: 0,
+        footerHeight: 0,
       }),
     );
 
@@ -153,13 +161,10 @@ describe('TestCardsStreamingPaginationAndRatioSwitching', () => {
       expect(page.getAttribute('data-total-pages')).toBe(String(result.state.totalPages));
       expect(page.getAttribute('data-ratio')).toBe('3:4');
 
-      const headers = page.querySelectorAll('[data-morph-generated="header"]');
-      const footers = page.querySelectorAll('[data-morph-generated="footer"]');
-      expect(headers.length).toBe(1);
-      expect(footers.length).toBe(1);
-
-      const expectedFooter = `${String(pageNum).padStart(2, '0')} / ${String(result.state.totalPages).padStart(2, '0')}`;
-      expect(footers[0].textContent).toContain(expectedFooter);
+      const headers = page.querySelectorAll('.morph-card-header, [data-morph-generated="header"]');
+      const footers = page.querySelectorAll('.morph-card-footer, [data-morph-generated="footer"]');
+      expect(headers.length).toBe(0);
+      expect(footers.length).toBe(0);
 
       // Zero blank waste pages: every page must contain at least one non-generated semantic block
       const semanticBlocks = Array.from(page.querySelectorAll('*')).filter(
@@ -212,8 +217,8 @@ describe('TestCardsStreamingPaginationAndRatioSwitching', () => {
     expect(finalPages.length).toBe(pages34);
     for (const page of finalPages) {
       expect(page.getAttribute('data-ratio')).toBe('3:4');
-      expect(page.querySelectorAll('[data-morph-generated="header"]').length).toBe(1);
-      expect(page.querySelectorAll('[data-morph-generated="footer"]').length).toBe(1);
+      expect(page.querySelectorAll('.morph-card-header, [data-morph-generated="header"]').length).toBe(0);
+      expect(page.querySelectorAll('.morph-card-footer, [data-morph-generated="footer"]').length).toBe(0);
     }
 
     expect(stripGeneratedText(root.outerHTML)).toBe(originalText);
@@ -615,8 +620,8 @@ describe('TestCardsSelectionAndBrowserLayoutVerification', () => {
     expect(snapshot.ready).toBe(true);
     const previewDoc = documentOf(snapshot.html);
     expect(previewDoc.querySelectorAll('section.morph-card-page').length).toBeGreaterThanOrEqual(2);
-    expect(previewDoc.querySelectorAll('[data-morph-generated="header"]').length).toBeGreaterThanOrEqual(2);
-    expect(previewDoc.querySelectorAll('[data-morph-generated="footer"]').length).toBeGreaterThanOrEqual(2);
+    expect(previewDoc.querySelectorAll('.morph-card-header, [data-morph-generated="header"]').length).toBe(0);
+    expect(previewDoc.querySelectorAll('.morph-card-footer, [data-morph-generated="footer"]').length).toBe(0);
     expect(previewDoc.querySelectorAll('thead[data-morph-generated="repeat"]').length).toBeGreaterThanOrEqual(1);
 
     // 1. Full snapshot serialization strips all generated headers/footers/repeated theads and unwraps .morph-card-page
@@ -659,7 +664,7 @@ describe('TestCardsSelectionAndBrowserLayoutVerification', () => {
         '## 第一节：多比例画布尺寸契约',
         '',
         ...Array.from(
-          { length: 10 },
+          { length: 12 },
           (_, i) =>
             `第 ${i + 1} 段测试文本：在真实浏览器排版引擎中验证每张卡片的渲染边界尺寸与预设完全一致，且页面内容区域绝不发生垂直截断或溢出。`,
         ),
@@ -735,6 +740,100 @@ describe('TestCardsSelectionAndBrowserLayoutVerification', () => {
         expect(item.height).toBe(540);
         expect(item.overflowPx).toBeLessThanOrEqual(2);
       }
+    } finally {
+      store.clear();
+    }
+  });
+
+  it('test_oversize_list_item_with_nested_sublist_splits_across_cards_without_vertical_overflow', async () => {
+    const store = new AssetStore();
+    try {
+      const record = await store.ingest(png(7, 800, 400), { fileName: 'network-overview.png' });
+
+      const subItem1 =
+        '子项 1（公网地址体系）：第一类是**公网 IP**（如 `203.0.113.50`），由全球互联网号码分配机构统一规划并由各级运营商逐级下发，在全球公网路由表中具备唯一可达性。任何部署在云端服务器上的对外接口、网关节点或权威域名解析器（如 `8.8.8.8` 与 `1.1.1.1`），都必须绑定至少一个公网地址或通过弹性公网网关映射，才能直接响应来自世界各地客户端的三次握手与数据包传输请求，是跨地域互联网通信的绝对坐标基石。在实际运维中还需配合弹性公网 `EIP` 与边界路由策略实现高可用故障切换。';
+      const subItem2 =
+        '子项 2（局域网私有地址）：第二类是**局域网/内网 IP**（如 `192.168.x.x`、`10.x.x.x`、`172.16.x.x`），专门预留给家庭路由器、办公无线网以及云厂商虚拟私有云 `VPC` 内部使用。这些私有地址在局域网内部可以免费分配给成百上千台终端设备，但在跨越边界路由器访问外部互联网时，必须依赖网络地址转换协议 `NAT` 将源地址动态重写为出口公网地址，从而在缓解全球地址枯竭的同时天然隔离外部直接扫描。企业级网段规划通常按可用区与业务层级切分子网掩码。';
+      const subItem3 =
+        '子项 3（本地回环通信）：第三类是**本地回环地址** `127.0.0.1`（主机名通常映射为 `localhost`，IPv6 下对应 `::1`）。发往该地址的所有数据帧永远不会流经物理网卡驱动或外部交换机，而是直接在操作系统内核的虚拟环回接口 `lo0` 中完成短路转发。开发者在本地启动后端微服务（例如监听 `127.0.0.1:8080` 或 `127.0.0.1:5432`）进行联调测试时，能够确保服务仅对本机进程可见，彻底规避局域网嗅探风险。同时本地反向代理如 `Nginx` 也常通过回环端口转发上游流量。';
+      const subItem4 =
+        '子项 4（全零与广播元地址）：第四类是**特殊元地址** `0.0.0.0` 与受限广播地址 `255.255.255.255`。当服务端程序在配置文件中将监听地址设为 `0.0.0.0:3000` 时，内核会自动绑定当前主机上的每一块物理网卡、容器网桥（如 `docker0`）以及回环接口；而在生产环境部署数据库或内部管理后台时，若不慎使用 `0.0.0.0` 替代内网地址且未配置防火墙安全组规则，极易导致敏感端口直接暴露在公网扫描之下。因此安全基线审计要求所有内部中间件显式绑定内网接口地址。';
+
+      const markdown = [
+        '# 网络寻址与监听安全实战指南',
+        '',
+        '在现代分布式系统与云原生网络架构中，理解数据包如何跨越物理网卡、内核协议栈与边界网关到达目标进程，是排查线上连接超时与拒绝访问故障的第一步。',
+        '',
+        '### 一、 IP 地址、网卡绑定与多维寻址体系',
+        '',
+        `![图 1 架构总览](${record.uri})`,
+        '',
+        '图 1　IP、端口与 DNS 知识结构：左侧是找到机器和进程的 IP、网卡、端口与监听，右侧是把域名翻译成 IP 的 DNS 体系',
+        '',
+        '- **IP 地址：给每一台联网设备分配的门牌号，决定数据包在复杂网络拓扑中的转发终点**',
+        `  - ${subItem1}`,
+        `  - ${subItem2}`,
+        `  - ${subItem3}`,
+        `  - ${subItem4}`,
+      ].join('\n');
+
+      const snapshot = await buildDeliverySnapshot(markdown, 'cards', store, {
+        cardsOptions: { ratio: '3:4' },
+      });
+
+      await page.setViewportSize({ width: 1400, height: 1200 });
+      const cardMeasurements = await page.evaluate((html) => {
+        document.body.style.margin = '0';
+        document.body.innerHTML = html;
+        const cards = Array.from(document.querySelectorAll('section.morph-card-page')) as HTMLElement[];
+        return cards.map((card) => {
+          const cardRect = card.getBoundingClientRect();
+          const footer = card.querySelector('.morph-card-footer, [data-morph-generated="footer"]') as HTMLElement | null;
+          const footerRect = footer ? footer.getBoundingClientRect() : null;
+          return {
+            page: card.getAttribute('data-page'),
+            scrollHeight: card.scrollHeight,
+            clientHeight: card.clientHeight,
+            overflowPx: card.scrollHeight - card.clientHeight,
+            footerOverflowPx: footerRect ? footerRect.bottom - cardRect.bottom : 0,
+          };
+        });
+      }, snapshot.html);
+
+      evidence('cards-oversize-nested-list-item', {
+        totalPages: cardMeasurements.length,
+        cardMeasurements,
+      });
+
+      for (const m of cardMeasurements) {
+        expect(m.overflowPx, `Page ${m.page} overflowed vertically by ${m.overflowPx}px`).toBeLessThanOrEqual(2);
+        expect(m.footerOverflowPx, `Page ${m.page} footer overflowed card bottom by ${m.footerOverflowPx}px`).toBeLessThanOrEqual(1);
+      }
+      expect(cardMeasurements.length).toBeGreaterThanOrEqual(3);
+
+      // Verify serializeFullSnapshot preserves lead text and all 4 nested sub-items without loss or duplication
+      const fullPayload = serializeFullSnapshot(snapshot, store);
+      expect(fullPayload.plainText).toContain('IP 地址：给每一台联网设备分配的门牌号');
+      expect(fullPayload.plainText.split('子项 1（公网地址体系）').length - 1).toBe(1);
+      expect(fullPayload.plainText.split('子项 2（局域网私有地址）').length - 1).toBe(1);
+      expect(fullPayload.plainText.split('子项 3（本地回环通信）').length - 1).toBe(1);
+      expect(fullPayload.plainText.split('子项 4（全零与广播元地址）').length - 1).toBe(1);
+
+      // Verify re-paginating with a large contentHeightOverride merges the split list item back into 1 top-level <li> with 4 nested <li>s
+      const merged = paginateCardsHtml(snapshot.html, {
+        ratio: '3:4',
+        contentHeightOverride: 3000,
+      });
+      const mergedDoc = documentOf(merged.html);
+      expect(mergedDoc.querySelectorAll('section.morph-card-page').length).toBe(1);
+      const topUl = mergedDoc.querySelector('section.morph-card-page > ul');
+      expect(topUl).not.toBeNull();
+      const topLis = Array.from(topUl!.children).filter((el) => el.tagName.toLowerCase() === 'li');
+      expect(topLis.length).toBe(1);
+      const nestedUls = Array.from(topLis[0].children).filter((el) => el.tagName.toLowerCase() === 'ul');
+      expect(nestedUls.length).toBe(1);
+      const nestedLis = Array.from(nestedUls[0].children).filter((el) => el.tagName.toLowerCase() === 'li');
+      expect(nestedLis.length).toBe(4);
     } finally {
       store.clear();
     }

@@ -261,14 +261,11 @@ export async function rasterizeCardPage(
     options?.fileName ?? `${prefix}-${String(pageNumber).padStart(padLen, '0')}.png`;
 
   const model = extractPageVisualModel(cardPageEl, options);
-  const { bgColor, textColor, accentColor, headerText, footerText, blocks, signatureHash1, signatureHash2 } =
-    model;
+  const { bgColor, textColor, accentColor, blocks, signatureHash1 } = model;
 
   const borderColor = mixRgb(bgColor, textColor, 0.16);
-  const dividerColor = mixRgb(bgColor, textColor, 0.24);
   const surfaceColor = mixRgb(bgColor, accentColor, 0.14);
   const codeSurfaceColor = mixRgb(bgColor, textColor, 0.1);
-  const mutedTextColor = mixRgb(bgColor, textColor, 0.55);
 
   const rowStride = width * 3 + 1;
   const rawRows = new Uint8Array(rowStride * height);
@@ -350,48 +347,11 @@ export async function rasterizeCardPage(
   const padRight = Math.round(preset.padding.right * exportScale);
   const padTop = Math.round(preset.padding.top * exportScale);
   const padBottom = Math.round(preset.padding.bottom * exportScale);
-  const headerH = Math.round(preset.headerHeight * exportScale);
-  const footerH = Math.round(preset.footerHeight * exportScale);
   const contentWidth = Math.max(32, width - padLeft - padRight);
 
-  // Header band & separator
-  const headerY = padTop;
-  const headerBarH = Math.max(6, Math.round(10 * exportScale));
-  const headerTextW = Math.min(
-    Math.round(contentWidth * 0.55),
-    Math.max(48, headerText.length * Math.round(9 * exportScale)),
-  );
-  fillRect(padLeft, headerY + Math.round((headerH - headerBarH) / 2), headerTextW, headerBarH, mutedTextColor);
-
-  // Deterministic content + token signature strip in header right
-  for (let bit = 0; bit < 16; bit++) {
-    const bit1 = (signatureHash1 >>> (bit * 2)) & 0x3;
-    const bit2 = (signatureHash2 >>> (bit * 2)) & 0x3;
-    const stripColor: RgbTuple =
-      bit1 === 0
-        ? accentColor
-        : bit1 === 1
-        ? textColor
-        : bit1 === 2
-        ? surfaceColor
-        : [
-            (accentColor[0] ^ ((signatureHash1 >>> bit) & 0x7f)) & 0xff,
-            (textColor[1] ^ ((signatureHash2 >>> bit) & 0x7f)) & 0xff,
-            (bgColor[2] ^ (((signatureHash1 ^ signatureHash2) >>> bit) & 0x7f)) & 0xff,
-          ];
-    const barW = Math.max(4, Math.round(6 * exportScale));
-    const bx = width - padRight - (16 - bit) * (barW + 2);
-    const bh = Math.max(4, Math.round((6 + bit2 * 2) * exportScale));
-    fillRect(bx, headerY + Math.round((headerH - bh) / 2), barW, bh, stripColor);
-  }
-
-  // Header divider line
-  const dividerH = Math.max(2, Math.round(2 * exportScale));
-  fillRect(padLeft, padTop + headerH - dividerH, contentWidth, dividerH, dividerColor);
-
   // Render content blocks inside body
-  let cursorY = padTop + headerH + Math.round(16 * exportScale);
-  const maxBodyY = height - padBottom - footerH - Math.round(12 * exportScale);
+  let cursorY = padTop;
+  const maxBodyY = height - padBottom;
 
   for (let idx = 0; idx < blocks.length; idx++) {
     if (cursorY >= maxBodyY) break;
@@ -488,19 +448,6 @@ export async function rasterizeCardPage(
     }
     cursorY += Math.round(10 * exportScale);
   }
-
-  // Footer divider & page number bar
-  const footerTopY = height - padBottom - footerH;
-  fillRect(padLeft, footerTopY, contentWidth, dividerH, dividerColor);
-  const footerBarH = Math.max(6, Math.round(9 * exportScale));
-  const footerBarW = Math.max(36, Math.min(contentWidth, footerText.length * Math.round(8 * exportScale)));
-  fillRect(
-    width - padRight - footerBarW,
-    footerTopY + Math.round((footerH - footerBarH) / 2),
-    footerBarW,
-    footerBarH,
-    mutedTextColor,
-  );
 
   const pngData = encodeRgbPng(width, height, rawRows);
   const crc32 = computeCrc32(pngData);

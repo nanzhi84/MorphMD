@@ -136,6 +136,107 @@ describe('TestAstPipeline', () => {
     expect(result.html).not.toMatch(/javascript:|on(?:click|error)=|position\s*:\s*fixed/i);
     expect(result.diagnostics.length).toBeGreaterThan(0);
   });
+
+  it('test_cjk_and_punctuation_adjacent_inline_formatting_renders_semantic_tags_without_raw_delimiters', async () => {
+    const source = [
+      '网卡、多个 IP 入口，服务端程序占用端口时，必须向操作系统声明自己愿意接收从哪张网卡进来的流量：',
+      '',
+      '>**回环监听（127.0.0.1）：**当后端程序提示运行在 http://127.0.0.1:8000 时，代表它向操作系统声明只接收本机…',
+      '',
+      '这是**（重点内容）**与**(次要内容)**以及*（斜体说明）：*还有~~（废弃项）：~~紧接着中文，实现**C++**与**50%**提升。',
+    ].join('\n');
+    const result = await compileMarkdown(source);
+    const syncResult = compileMarkdownSync(source);
+    evidence('ast-cjk-inline-formatting', { source, ...result });
+
+    for (const html of [result.html, syncResult.html]) {
+      const doc = documentOf(html);
+      const quote = doc.querySelector('.morph-quote');
+      expect(quote).not.toBeNull();
+      expect(quote!.querySelector('strong')?.textContent).toBe('回环监听（127.0.0.1）：');
+      expect(quote!.querySelector('a')?.getAttribute('href')).toBe('http://127.0.0.1:8000');
+      expect(quote!.textContent?.trim()).toBe(
+        '回环监听（127.0.0.1）：当后端程序提示运行在 http://127.0.0.1:8000 时，代表它向操作系统声明只接收本机…'
+      );
+
+      const paragraphs = [...doc.querySelectorAll('.morph-doc > .morph-p')];
+      const inlinePara = paragraphs[1]!;
+      expect([...inlinePara.querySelectorAll('strong')].map(el => el.textContent)).toEqual([
+        '（重点内容）',
+        '(次要内容)',
+        'C++',
+        '50%',
+      ]);
+      expect([...inlinePara.querySelectorAll('em')].map(el => el.textContent)).toEqual(['（斜体说明）：']);
+      expect([...inlinePara.querySelectorAll('del')].map(el => el.textContent)).toEqual(['（废弃项）：']);
+      expect(inlinePara.textContent).toBe(
+        '这是（重点内容）与(次要内容)以及（斜体说明）：还有（废弃项）：紧接着中文，实现C++与50%提升。'
+      );
+      expect(doc.body.textContent).not.toMatch(/\*\*|~~/);
+    }
+  });
+
+  it('test_image_captions_from_adjacent_lines_italic_lines_and_titles_render_as_caption_blocks', async () => {
+    const source = [
+      '![](https://example.com/arch.png)',
+      '左侧是找到机器和进程的 IP、网卡、端口与监听',
+      '',
+      '![图 1　IP、端口与 DNS 知识结构：左侧是找到机器和进程的 IP、网卡、端口与监听，右侧是把域名翻译成 IP 的 DNS 体系](https://example.com/net.png)',
+      '',
+      '![](https://example.com/seq.png)',
+      '',
+      '*补充说明：客户端与服务端三次握手时序*',
+      '',
+      '![](https://example.com/title.png "通过图片 title 属性声明的图注")',
+      '',
+      '![](https://example.com/normal.png)',
+      '',
+      '这是一段普通的正文段落，不应该被误判为图注。',
+    ].join('\n');
+
+    const result = await compileMarkdown(source);
+    const syncResult = compileMarkdownSync(source);
+    evidence('ast-image-captions', { source, asyncHtml: result.html, syncHtml: syncResult.html });
+
+    const expectedCaptions = [
+      '左侧是找到机器和进程的 IP、网卡、端口与监听',
+      '图 1　IP、端口与 DNS 知识结构：左侧是找到机器和进程的 IP、网卡、端口与监听，右侧是把域名翻译成 IP 的 DNS 体系',
+      '补充说明：客户端与服务端三次握手时序',
+      '通过图片 title 属性声明的图注',
+    ];
+
+    for (const html of [result.html, syncResult.html]) {
+      const doc = documentOf(html);
+      const images = [...doc.querySelectorAll('img.morph-img')];
+      expect(images).toHaveLength(5);
+
+      for (let i = 0; i < 4; i++) {
+        const mediaPara = images[i]!.closest('p');
+        expect(mediaPara).not.toBeNull();
+        expect(mediaPara!.classList.contains('morph-p')).toBe(true);
+        expect(mediaPara!.classList.contains('morph-figure-media')).toBe(true);
+
+        const nextEl = mediaPara!.nextElementSibling;
+        expect(nextEl).not.toBeNull();
+        expect(nextEl!.tagName.toLowerCase()).toBe('p');
+        expect(nextEl!.classList.contains('morph-caption')).toBe(true);
+        expect(nextEl!.textContent?.trim()).toBe(expectedCaptions[i]);
+        expect(nextEl!.getAttribute('data-node-id')).toMatch(/^node-/);
+        expect(nextEl!.getAttribute('data-source-range')).toMatch(/^\d+-\d+$/);
+      }
+
+      const fifthMediaPara = images[4]!.closest('p');
+      expect(fifthMediaPara).not.toBeNull();
+      expect(fifthMediaPara!.classList.contains('morph-p')).toBe(true);
+      expect(fifthMediaPara!.classList.contains('morph-figure-media')).toBe(false);
+
+      const fifthNextEl = fifthMediaPara!.nextElementSibling;
+      expect(fifthNextEl).not.toBeNull();
+      expect(fifthNextEl!.classList.contains('morph-p')).toBe(true);
+      expect(fifthNextEl!.classList.contains('morph-caption')).toBe(false);
+      expect(fifthNextEl!.textContent?.trim()).toBe('这是一段普通的正文段落，不应该被误判为图注。');
+    }
+  });
 });
 
 describe('TestAstColdStart', () => {

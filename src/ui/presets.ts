@@ -559,6 +559,7 @@ const BASE_THEME_ACCENT_CSS = `
   line-height: 1.75;
   letter-spacing: 0.01em;
   color: var(--claude-text-primary);
+  text-align: left;
   margin-top: 0px;
   margin-bottom: 16px;
 }
@@ -616,6 +617,7 @@ a:hover,
   font-size: 15px;
   line-height: 1.7;
   color: #3D3C3A;
+  text-align: left;
 }
 
 .morph-quote .morph-p,
@@ -626,6 +628,7 @@ a:hover,
   font-size: 15px;
   line-height: 1.7;
   color: #3D3C3A;
+  text-align: left;
   margin-top: 0px;
   margin-bottom: 0px;
 }
@@ -643,6 +646,7 @@ a:hover,
   font-size: 15px;
   line-height: 1.75;
   color: var(--claude-text-primary);
+  text-align: left;
   margin-top: 0px;
   margin-bottom: 16px;
   padding-left: 22px;
@@ -655,6 +659,7 @@ a:hover,
   line-height: 1.75;
   letter-spacing: 0.01em;
   color: var(--claude-text-primary);
+  text-align: left;
   margin-top: 0px;
   margin-bottom: 6px;
   padding-left: 4px;
@@ -715,6 +720,7 @@ pre.morph-code code,
   font-size: 14.5px;
   line-height: 1.65;
   color: var(--claude-text-primary);
+  text-align: left;
   background-color: var(--claude-bg-secondary);
   border-left: 3px solid var(--claude-accent);
   border-radius: 0px 8px 8px 0px;
@@ -875,12 +881,24 @@ figure,
   margin-bottom: 0px;
 }
 
+.morph-p.morph-figure-media,
+.morph-figure-media,
+.claude-prose p.morph-figure-media {
+  margin-top: 0px;
+  margin-bottom: 6px;
+}
+
+.morph-caption,
 figcaption,
+.claude-prose .morph-caption,
 .claude-prose figcaption {
-  margin-top: 8px;
+  font-family: var(--font-sans);
   font-size: 13px;
-  color: var(--claude-text-secondary);
-  line-height: 1.4;
+  line-height: 1.5;
+  color: #787774;
+  text-align: left;
+  margin-top: 0px;
+  margin-bottom: 16px;
 }
 `.trim();
 
@@ -971,6 +989,7 @@ const YORYON_EDITORIAL_CSS = `
   line-height: 1.75;
   letter-spacing: 0em;
   color: var(--yoryon-reading-fg);
+  text-align: left;
   margin-top: 0px;
   margin-bottom: 16px;
 }
@@ -1024,6 +1043,7 @@ a,
   font-size: 15px;
   line-height: 1.7;
   color: var(--yoryon-foreground);
+  text-align: left;
 }
 
 .morph-quote .morph-p,
@@ -1035,6 +1055,7 @@ a,
   font-size: 15px;
   line-height: 1.7;
   color: var(--yoryon-foreground);
+  text-align: left;
   margin-top: 0px;
   margin-bottom: 0px;
 }
@@ -1052,6 +1073,7 @@ a,
   font-size: 15px;
   line-height: 1.75;
   color: var(--yoryon-reading-fg);
+  text-align: left;
   margin-top: 0px;
   margin-bottom: 16px;
   padding-left: 22px;
@@ -1064,6 +1086,7 @@ a,
   line-height: 1.75;
   letter-spacing: 0em;
   color: var(--yoryon-reading-fg);
+  text-align: left;
   margin-top: 0px;
   margin-bottom: 6px;
   padding-left: 4px;
@@ -1125,6 +1148,7 @@ pre.morph-code code,
   font-size: 14.5px;
   line-height: 1.65;
   color: var(--yoryon-reading-fg);
+  text-align: left;
   background-color: var(--yoryon-reading-surface);
   border-left: 3px solid var(--yoryon-primary);
   border-radius: 0px 8px 8px 0px;
@@ -1285,13 +1309,24 @@ figure,
   margin-bottom: 0px;
 }
 
+.morph-p.morph-figure-media,
+.morph-figure-media,
+.prose-yoryon p.morph-figure-media {
+  margin-top: 0px;
+  margin-bottom: 6px;
+}
+
+.morph-caption,
 figcaption,
+.prose-yoryon .morph-caption,
 .prose-yoryon figcaption {
   font-family: var(--yoryon-font-sans);
-  margin-top: 8px;
   font-size: 13px;
-  color: var(--yoryon-reading-muted);
-  line-height: 1.6;
+  line-height: 1.5;
+  color: #787774;
+  text-align: left;
+  margin-top: 0px;
+  margin-bottom: 16px;
 }
 `.trim();
 
